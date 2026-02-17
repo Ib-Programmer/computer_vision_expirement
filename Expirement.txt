@@ -1,0 +1,31 @@
+Summary of Experimental Design 
+
+To systematically validate the proposed outdoor object detection and face recognition system, the experiments are organized into six sequential phases. Each phase evaluates a specific component of the system, progressing from data preparation to full end-to-end system validation.
+
+Phase 1: Dataset Preparation and Environment Setup
+
+This phase focuses on preparing datasets and configuring the experimental environment. Public outdoor datasets containing diverse weather and lighting conditions are selected and preprocessed. Images and videos are resized, normalized, and augmented using fog simulation, low-light adjustment, and motion blur to emulate real outdoor scenarios. The experimental environment is configured using PyTorch for model execution, with CPU-based inference on a local system and GPU-based inference on cloud platforms when required.
+
+Phase 2: Image Enhancement Evaluation
+
+In this phase, deep learning–based image enhancement models are evaluated to improve visual quality under adverse outdoor conditions such as fog, haze, rain, and low illumination. Models including Restormer, FFA-Net, and Zero-DCE++ are tested independently. Their performance is evaluated using objective image quality metrics such as PSNR, SSIM, and NIQE, as well as inference latency. The best-performing enhancement model is selected for integration into the subsequent detection and recognition pipeline.
+
+Phase 3: Object Detection Performance Evaluation
+
+This phase evaluates the performance of object detection models on both raw and enhanced images. Multiple detection models, including YOLOv8 and RT-DETR, are tested and compared. Performance is measured using standard detection metrics such as mean Average Precision (mAP), precision, recall, inference time, and frames per second (FPS). The experiments analyze the impact of image enhancement on detection accuracy and robustness under complex outdoor conditions.
+
+Phase 4: Face Detection and Recognition Evaluation
+
+In this phase, the system’s ability to detect and recognize faces in outdoor scenes is evaluated. Face detection is performed using RetinaFace, followed by feature extraction using ArcFace or MobileFaceNet. Embedding-based face matching is conducted using cosine similarity with FAISS or Milvus indexing. Evaluation metrics include recognition accuracy, false acceptance rate (FAR), false rejection rate (FRR), and recognition latency. The robustness of face recognition under varying outdoor conditions is analyzed.
+
+Phase 5: Model Optimization and Acceleration Analysis
+
+This phase focuses on optimizing the selected models for deployment efficiency. Models are converted to ONNX format and accelerated using TensorRT or ONNX Runtime, with optional FP16 or INT8 quantization. The optimized models are compared with original implementations in terms of inference latency, throughput, GPU utilization, and accuracy degradation. This phase demonstrates the trade-off between performance and computational efficiency.
+
+Phase 6: End-to-End System and Deployment Evaluation
+
+The final phase evaluates the complete system in a cloud-based deployment environment. The integrated pipeline—including image enhancement, object detection, face recognition, backend services, and frontend visualization—is tested using RESTful APIs. System-level performance metrics such as end-to-end latency, concurrent user handling, task logging accuracy, and system stability are measured. This phase validates the practicality, scalability, and real-world applicability of the proposed system.
+
+Overall Experimental Flow
+
+The phased experimental design ensures that each module is independently validated before full system integration. Through progressive evaluation and optimization, the experiments comprehensively verify the accuracy, robustness, real-time capability, and engineering feasibility of the proposed outdoor object detection and face recognition system.
