@@ -1,0 +1,51 @@
+project:
+  name: outdoor_detection_face_recognition
+  root_dir: ./
+
+datasets:
+  bdd100k:
+    description: "Berkeley DeepDrive 100K - diverse driving scenes"
+    path: ./datasets/bdd100k
+    source: "https://www.bdd100k.com/"
+
+  rtts:
+    description: "Real-world Task-driven Testing Set - foggy/hazy images"
+    path: ./datasets/rtts
+    source: "https://sites.google.com/view/raborgroup/datasets"
+
+  widerface:
+    description: "WIDER FACE - face detection benchmark"
+    path: ./datasets/widerface
+    source: "http://shuoyang1213.me/WIDERFACE/"
+
+  lfw:
+    description: "Labeled Faces in the Wild - face recognition benchmark"
+    path: ./datasets/lfw
+    source: "http://vis-www.cs.umass.edu/lfw/"
+
+preprocessing:
+  target_size: [640, 640]
+  normalize: true
+  pixel_range: [0, 1]
+  split_ratio:
+    train: 0.70
+    val: 0.15
+    test: 0.15
+
+augmentation:
+  fog:
+    enabled: true
+    fog_coef_range: [0.3, 0.8]
+    alpha_coef: 0.08
+  low_light:
+    enabled: true
+    gamma_range: [2.0, 4.0]
+    brightness_reduction: [0.2, 0.5]
+  motion_blur:
+    enabled: true
+    blur_limit: [7, 15]
+  rain:
+    enabled: true
+    slant_range: [-10, 10]
+    drop_length: 20
+    drop_width: 1

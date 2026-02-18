@@ -1,0 +1,17 @@
+torch
+torchvision
+torchaudio
+opencv-python
+albumentations
+matplotlib
+numpy
+pandas
+scikit-image
+Pillow
+tqdm
+gdown
+kaggle
+ultralytics
+onnx
+onnxruntime
+pyiqa

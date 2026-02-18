@@ -1,0 +1,340 @@
+"""
+Phase 1: Dataset Download Script
+Downloads public datasets for outdoor object detection and face recognition.
+
+Datasets:
+  - RTTS (Real-world Task-driven Testing Set) - foggy/hazy outdoor images
+  - WiderFace - face detection benchmark
+  - LFW (Labeled Faces in the Wild) - face recognition benchmark
+  - BDD100K - requires manual download (account needed)
+"""
+
+import os
+import sys
+import zipfile
+import tarfile
+import urllib.request
+import shutil
+from pathlib import Path
+from tqdm import tqdm
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATASETS_DIR = BASE_DIR / "datasets"
+
+
+class DownloadProgressBar(tqdm):
+    def update_to(self, b=1, bsize=1, tsize=None):
+        if tsize is not None:
+            self.total = tsize
+        self.update(b * bsize - self.n)
+
+
+def download_file(url, dest_path, desc="Downloading"):
+    """Download a file with progress bar."""
+    dest_path = Path(dest_path)
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if dest_path.exists():
+        print(f"  [SKIP] {dest_path.name} already exists")
+        return dest_path
+
+    print(f"  Downloading: {url}")
+    with DownloadProgressBar(unit='B', unit_scale=True, miniters=1, desc=desc) as t:
+        urllib.request.urlretrieve(url, dest_path, reporthook=t.update_to)
+    print(f"  Saved to: {dest_path}")
+    return dest_path
+
+
+def extract_zip(zip_path, extract_to):
+    """Extract a zip archive."""
+    print(f"  Extracting {zip_path.name}...")
+    with zipfile.ZipFile(zip_path, 'r') as z:
+        z.extractall(extract_to)
+    print(f"  Extracted to: {extract_to}")
+
+
+def extract_tar(tar_path, extract_to):
+    """Extract a tar/tar.gz archive."""
+    print(f"  Extracting {tar_path.name}...")
+    with tarfile.open(tar_path, 'r:*') as t:
+        t.extractall(extract_to)
+    print(f"  Extracted to: {extract_to}")
+
+
+# ── 1. LFW (Labeled Faces in the Wild) ──────────────────────────────────────
+
+def download_lfw():
+    """Download LFW dataset (~173MB) via sklearn or gdown fallback."""
+    print("\n" + "="*60)
+    print("DOWNLOADING: LFW (Labeled Faces in the Wild)")
+    print("="*60)
+
+    dest_dir = DATASETS_DIR / "lfw"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # Check if already extracted
+    if (dest_dir / "lfw").exists() and len(list((dest_dir / "lfw").glob("*"))) > 100:
+        print("  [SKIP] LFW already downloaded and extracted")
+        return
+
+    # Try sklearn fetch (handles mirrors automatically)
+    try:
+        print("  Trying sklearn.datasets.fetch_lfw_people...")
+        from sklearn.datasets import fetch_lfw_people
+        dataset = fetch_lfw_people(data_home=str(dest_dir), download_if_missing=True)
+        print(f"  Downloaded via sklearn: {dataset.images.shape[0]} images")
+        print("  LFW download complete!")
+        print(f"  Location: {dest_dir}")
+        return
+    except Exception as e:
+        print(f"  sklearn method failed: {e}")
+
+    # Fallback: gdown from Google Drive mirror
+    try:
+        import gdown
+        print("  Trying Google Drive mirror...")
+        file_id = "1CPSeum3HpopfomUEK1gts2elo4F1Uuey"
+        archive_path = dest_dir / "lfw.tgz"
+        if not archive_path.exists():
+            gdown.download(id=file_id, output=str(archive_path), quiet=False)
+        if archive_path.exists():
+            extract_tar(archive_path, dest_dir)
+            print("  LFW download complete!")
+            print(f"  Location: {dest_dir / 'lfw'}")
+            return
+    except Exception as e:
+        print(f"  gdown method failed: {e}")
+
+    # Fallback: direct URL (original server)
+    print("  Trying original UMass server...")
+    url = "http://vis-www.cs.umass.edu/lfw/lfw.tgz"
+    archive_path = dest_dir / "lfw.tgz"
+    download_file(url, archive_path, desc="LFW")
+    extract_tar(archive_path, dest_dir)
+
+    pairs_url = "http://vis-www.cs.umass.edu/lfw/pairs.txt"
+    download_file(pairs_url, dest_dir / "pairs.txt", desc="LFW pairs")
+
+    print("  LFW download complete!")
+    print(f"  Location: {dest_dir / 'lfw'}")
+
+
+# ── 2. WiderFace ────────────────────────────────────────────────────────────
+
+def download_widerface():
+    """Download WiderFace dataset via gdown (Google Drive)."""
+    print("\n" + "="*60)
+    print("DOWNLOADING: WiderFace")
+    print("="*60)
+
+    dest_dir = DATASETS_DIR / "widerface"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    if (dest_dir / "WIDER_train").exists() and (dest_dir / "WIDER_val").exists():
+        print("  [SKIP] WiderFace already downloaded and extracted")
+        return
+
+    try:
+        import gdown
+    except ImportError:
+        print("  [ERROR] gdown not installed. Run: pip install gdown")
+        return
+
+    # Google Drive file IDs for WiderFace
+    files = {
+        "WIDER_train.zip": "15hGDLhsx8bLgLcIRD5DhYt5iBxnjNF1M",
+        "WIDER_val.zip": "1GUCogbp16PMGa39thoMMeWxp7Rp5oM8Q",
+        "wider_face_split.zip": "1H68E4FCjjLdIny4Gp-6BFYNNSO9eClJq",
+    }
+
+    for filename, file_id in files.items():
+        output_path = dest_dir / filename
+        if output_path.exists():
+            print(f"  [SKIP] {filename} already exists")
+        else:
+            print(f"  Downloading {filename}...")
+            gdown.download(id=file_id, output=str(output_path), quiet=False)
+
+        # Extract
+        extracted_name = filename.replace(".zip", "")
+        if not (dest_dir / extracted_name).exists():
+            extract_zip(output_path, dest_dir)
+
+    print("  WiderFace download complete!")
+    print(f"  Location: {dest_dir}")
+
+
+# ── 3. RTTS (Real-world Task-driven Testing Set) ────────────────────────────
+
+def download_rtts():
+    """Download RTTS dataset for hazy/foggy images."""
+    print("\n" + "="*60)
+    print("DOWNLOADING: RTTS (Real-world Task-driven Testing Set)")
+    print("="*60)
+
+    dest_dir = DATASETS_DIR / "rtts"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    if (dest_dir / "RTTS").exists() or len(list(dest_dir.glob("*.png"))) > 100:
+        print("  [SKIP] RTTS already downloaded")
+        return
+
+    archive_path = dest_dir / "RTTS.zip"
+
+    # Method 1: Kaggle (if authenticated)
+    if not archive_path.exists():
+        try:
+            print("  Trying Kaggle API (tuncnguyn/rtts-dataset)...")
+            import kaggle
+            kaggle.api.dataset_download_files(
+                "tuncnguyn/rtts-dataset", path=str(dest_dir), unzip=True
+            )
+            print("  Downloaded via Kaggle!")
+            print(f"  Location: {dest_dir}")
+            return
+        except (Exception, SystemExit) as e:
+            print(f"  Kaggle method failed: {e}")
+
+    # Method 2: UT Austin Box mirror (official RESIDE-beta link)
+    if not archive_path.exists():
+        try:
+            print("  Trying UT Austin Box mirror (official RESIDE-beta)...")
+            box_url = "https://utexas.app.box.com/index.php?rm=box_download_shared_file&shared_name=2yekra41udg9rgyzi3ysi513cps621qz&file_id=f_766454923366"
+            download_file(box_url, archive_path, desc="RTTS")
+            # Verify it's actually a zip, not an HTML error page
+            if archive_path.exists() and archive_path.stat().st_size < 10000:
+                archive_path.unlink()
+                print("  Box download returned an error page, removing...")
+        except Exception as e:
+            print(f"  Box method failed: {e}")
+
+    # Method 3: gdown from Google Drive (original, may be rate-limited)
+    if not archive_path.exists():
+        try:
+            import gdown
+            print("  Trying Google Drive (may be rate-limited)...")
+            file_id = "1SiMgiAEJqOGoIINrupISLNUcFBJb_3tU"
+            gdown.download(id=file_id, output=str(archive_path), quiet=False)
+        except Exception as e:
+            print(f"  Google Drive method failed: {e}")
+
+    # Extract if we got the archive
+    if archive_path.exists() and archive_path.stat().st_size > 1000:
+        extract_zip(archive_path, dest_dir)
+        print("  RTTS download complete!")
+        print(f"  Location: {dest_dir}")
+    else:
+        # Clean up partial/empty file
+        if archive_path.exists():
+            archive_path.unlink()
+        print("  [ERROR] All download methods failed for RTTS.")
+        print("  Manual download options:")
+        print("    1. Kaggle: https://www.kaggle.com/datasets/tuncnguyn/rtts-dataset")
+        print("    2. Dropbox: https://bit.ly/3c4gl3z")
+        print(f"    3. Extract to: {dest_dir}")
+
+
+# ── 4. BDD100K ──────────────────────────────────────────────────────────────
+
+def download_bdd100k():
+    """Download BDD100K from archive.org mirror (~6.5GB images + 147MB labels)."""
+    print("\n" + "="*60)
+    print("DOWNLOADING: BDD100K (Berkeley DeepDrive)")
+    print("="*60)
+
+    dest_dir = DATASETS_DIR / "bdd100k"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    if (dest_dir / "images").exists() and len(list((dest_dir / "images").rglob("*.jpg"))) > 1000:
+        print("  [SKIP] BDD100K images already downloaded")
+        return
+
+    # Archive.org mirror - no registration needed
+    files = {
+        "bdd100k_images.zip": {
+            "url": "https://archive.org/download/bdd100k/bdd100k_images.zip",
+            "desc": "BDD100K Images (~6.5GB)",
+        },
+        "bdd100k_labels.zip": {
+            "url": "https://archive.org/download/bdd100k/bdd100k_labels.zip",
+            "desc": "BDD100K Labels (~147MB)",
+        },
+    }
+
+    for filename, info in files.items():
+        archive_path = dest_dir / filename
+
+        if archive_path.exists():
+            print(f"  [SKIP] {filename} already downloaded")
+        else:
+            print(f"  Downloading {info['desc']}...")
+            try:
+                download_file(info["url"], archive_path, desc=filename)
+            except Exception as e:
+                print(f"  [ERROR] Failed to download {filename}: {e}")
+                continue
+
+        # Extract
+        if archive_path.exists() and archive_path.stat().st_size > 10000:
+            try:
+                extract_zip(archive_path, dest_dir)
+            except Exception as e:
+                print(f"  [ERROR] Failed to extract {filename}: {e}")
+
+    # Verify
+    if (dest_dir / "images").exists():
+        print("  BDD100K download complete!")
+        print(f"  Location: {dest_dir}")
+    else:
+        print("  [WARNING] Download may have failed. Manual fallback:")
+        print("    https://archive.org/download/bdd100k")
+        print(f"    Extract to: {dest_dir}")
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
+def main():
+    print("Phase 1: Dataset Download")
+    print(f"Base directory: {BASE_DIR}")
+    print(f"Datasets directory: {DATASETS_DIR}")
+
+    DATASETS_DIR.mkdir(parents=True, exist_ok=True)
+
+    datasets = {
+        "lfw": download_lfw,
+        "widerface": download_widerface,
+        "rtts": download_rtts,
+        "bdd100k": download_bdd100k,
+    }
+
+    # Allow downloading specific datasets via CLI args
+    targets = sys.argv[1:] if len(sys.argv) > 1 else list(datasets.keys())
+
+    for name in targets:
+        if name in datasets:
+            try:
+                datasets[name]()
+            except Exception as e:
+                print(f"\n  [ERROR] Failed to download {name}: {e}")
+                print("  You can retry this dataset later.")
+        else:
+            print(f"\n  [WARNING] Unknown dataset: {name}")
+            print(f"  Available: {', '.join(datasets.keys())}")
+
+    print("\n" + "="*60)
+    print("DOWNLOAD SUMMARY")
+    print("="*60)
+    for name in targets:
+        d = DATASETS_DIR / name
+        if d.exists():
+            count = sum(1 for _ in d.rglob("*.jpg")) + sum(1 for _ in d.rglob("*.png"))
+            print(f"  {name:12s} -> {count:>6d} images found")
+        else:
+            print(f"  {name:12s} -> NOT DOWNLOADED")
+
+    print("\nDone! Next: run preprocess_data.py")
+
+
+if __name__ == "__main__":
+    main()
