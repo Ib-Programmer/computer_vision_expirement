@@ -148,18 +148,44 @@ def download_widerface():
         "wider_face_split.zip": "1H68E4FCjjLdIny4Gp-6BFYNNSO9eClJq",
     }
 
+    # Hugging Face mirror for labels (Google Drive often rate-limits)
+    hf_labels_url = "https://huggingface.co/datasets/wider_face/resolve/main/data/wider_face_split.zip"
+
     for filename, file_id in files.items():
         output_path = dest_dir / filename
         if output_path.exists():
             print(f"  [SKIP] {filename} already exists")
         else:
-            print(f"  Downloading {filename}...")
-            gdown.download(id=file_id, output=str(output_path), quiet=False)
+            downloaded = False
+
+            # For labels zip, try Hugging Face first (more reliable)
+            if filename == "wider_face_split.zip":
+                try:
+                    print(f"  Downloading {filename} from Hugging Face mirror...")
+                    download_file(hf_labels_url, output_path, desc=filename)
+                    if output_path.exists() and output_path.stat().st_size > 10000:
+                        downloaded = True
+                    else:
+                        if output_path.exists():
+                            output_path.unlink()
+                except Exception as e:
+                    print(f"  Hugging Face mirror failed: {e}")
+
+            # Fallback to Google Drive
+            if not downloaded:
+                try:
+                    print(f"  Downloading {filename} from Google Drive...")
+                    gdown.download(id=file_id, output=str(output_path), quiet=False)
+                except Exception as e:
+                    print(f"  Google Drive download failed for {filename}: {e}")
 
         # Extract
-        extracted_name = filename.replace(".zip", "")
-        if not (dest_dir / extracted_name).exists():
-            extract_zip(output_path, dest_dir)
+        if output_path.exists() and output_path.stat().st_size > 10000:
+            extracted_name = filename.replace(".zip", "")
+            if not (dest_dir / extracted_name).exists():
+                extract_zip(output_path, dest_dir)
+        elif not output_path.exists():
+            print(f"  [WARNING] {filename} not downloaded - skipping extraction")
 
     print("  WiderFace download complete!")
     print(f"  Location: {dest_dir}")
@@ -246,7 +272,7 @@ def download_bdd100k():
     dest_dir = DATASETS_DIR / "bdd100k"
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    if (dest_dir / "images").exists() and len(list((dest_dir / "images").rglob("*.jpg"))) > 1000:
+    if sum(1 for _ in dest_dir.rglob("*.jpg")) > 1000:
         print("  [SKIP] BDD100K images already downloaded")
         return
 
@@ -283,8 +309,10 @@ def download_bdd100k():
                 print(f"  [ERROR] Failed to extract {filename}: {e}")
 
     # Verify
-    if (dest_dir / "images").exists():
-        print("  BDD100K download complete!")
+    # Verify - archive.org extracts to bdd100k/bdd100k/images/ or bdd100k/images/
+    img_count = sum(1 for _ in dest_dir.rglob("*.jpg"))
+    if img_count > 100:
+        print(f"  BDD100K download complete! ({img_count} images found)")
         print(f"  Location: {dest_dir}")
     else:
         print("  [WARNING] Download may have failed. Manual fallback:")
