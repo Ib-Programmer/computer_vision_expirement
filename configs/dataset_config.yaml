@@ -23,6 +23,24 @@ datasets:
     path: ./datasets/lfw
     source: "http://vis-www.cs.umass.edu/lfw/"
 
+  exdark:
+    description: "Exclusively Dark Image Dataset - low-light object detection (12 classes)"
+    path: ./datasets/exdark
+    source: "https://github.com/cs-chan/Exclusively-Dark-Image-Dataset"
+    classes:
+      - Bicycle
+      - Boat
+      - Bottle
+      - Bus
+      - Car
+      - Cat
+      - Chair
+      - Cup
+      - Dog
+      - Motorbike
+      - People
+      - Table
+
 preprocessing:
   target_size: [640, 640]
   normalize: true

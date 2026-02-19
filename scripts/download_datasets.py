@@ -7,6 +7,7 @@ Datasets:
   - WiderFace - face detection benchmark
   - LFW (Labeled Faces in the Wild) - face recognition benchmark
   - BDD100K - requires manual download (account needed)
+  - ExDark (Exclusively Dark Image Dataset) - low-light object detection
 """
 
 import os
@@ -320,6 +321,146 @@ def download_bdd100k():
         print(f"    Extract to: {dest_dir}")
 
 
+# ── 5. ExDark (Exclusively Dark Image Dataset) ───────────────────────────────
+
+def download_exdark():
+    """Download ExDark dataset for low-light object detection.
+
+    ExDark contains 7,363 low-light images across 12 object classes:
+    Bicycle, Boat, Bottle, Bus, Car, Cat, Chair, Cup, Dog, Motorbike, People, Table.
+
+    Sources:
+      - GitHub: https://github.com/cs-chan/Exclusively-Dark-Image-Dataset
+      - Kaggle: soumikrakshit/exclusively-dark-image-dataset
+    """
+    print("\n" + "="*60)
+    print("DOWNLOADING: ExDark (Exclusively Dark Image Dataset)")
+    print("="*60)
+
+    dest_dir = DATASETS_DIR / "exdark"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    EXDARK_CLASSES = [
+        "Bicycle", "Boat", "Bottle", "Bus", "Car", "Cat",
+        "Chair", "Cup", "Dog", "Motorbike", "People", "Table",
+    ]
+
+    # Check if already downloaded (ExDark has ~7363 images across 12 class folders)
+    existing_images = (
+        sum(1 for _ in dest_dir.rglob("*.jpg"))
+        + sum(1 for _ in dest_dir.rglob("*.png"))
+        + sum(1 for _ in dest_dir.rglob("*.JPEG"))
+        + sum(1 for _ in dest_dir.rglob("*.JPG"))
+        + sum(1 for _ in dest_dir.rglob("*.PNG"))
+    )
+    if existing_images > 5000:
+        print(f"  [SKIP] ExDark already downloaded ({existing_images} images found)")
+        return
+
+    downloaded = False
+
+    # ── Method 1: GitHub releases ──
+    github_files = {
+        "ExDark.tar": "https://github.com/cs-chan/Exclusively-Dark-Image-Dataset/releases/download/Img/ExDark.tar",
+        "ExDark_Annno.tar": "https://github.com/cs-chan/Exclusively-Dark-Image-Dataset/releases/download/Annno/ExDark_Annno.tar",
+    }
+
+    try:
+        print("  Trying GitHub releases...")
+        all_ok = True
+        for filename, url in github_files.items():
+            archive_path = dest_dir / filename
+            if archive_path.exists() and archive_path.stat().st_size > 10000:
+                print(f"  [SKIP] {filename} already downloaded")
+            else:
+                try:
+                    download_file(url, archive_path, desc=filename)
+                    if not archive_path.exists() or archive_path.stat().st_size < 10000:
+                        print(f"  [WARNING] {filename} download appears too small or failed")
+                        if archive_path.exists():
+                            archive_path.unlink()
+                        all_ok = False
+                except Exception as e:
+                    print(f"  GitHub download failed for {filename}: {e}")
+                    if archive_path.exists():
+                        archive_path.unlink()
+                    all_ok = False
+
+        # Extract archives
+        for filename in github_files:
+            archive_path = dest_dir / filename
+            if archive_path.exists() and archive_path.stat().st_size > 10000:
+                try:
+                    extract_tar(archive_path, dest_dir)
+                except Exception as e:
+                    print(f"  [ERROR] Failed to extract {filename}: {e}")
+                    all_ok = False
+
+        # Check if images were extracted
+        img_count = (
+            sum(1 for _ in dest_dir.rglob("*.jpg"))
+            + sum(1 for _ in dest_dir.rglob("*.png"))
+            + sum(1 for _ in dest_dir.rglob("*.JPEG"))
+            + sum(1 for _ in dest_dir.rglob("*.JPG"))
+            + sum(1 for _ in dest_dir.rglob("*.PNG"))
+        )
+        if img_count > 1000:
+            downloaded = True
+            print(f"  GitHub download successful ({img_count} images extracted)")
+
+    except Exception as e:
+        print(f"  GitHub method failed: {e}")
+
+    # ── Method 2: Kaggle fallback ──
+    if not downloaded:
+        try:
+            print("  Trying Kaggle (soumikrakshit/exclusively-dark-image-dataset)...")
+            import kaggle
+            kaggle.api.dataset_download_files(
+                "soumikrakshit/exclusively-dark-image-dataset",
+                path=str(dest_dir),
+                unzip=True,
+            )
+            img_count = (
+                sum(1 for _ in dest_dir.rglob("*.jpg"))
+                + sum(1 for _ in dest_dir.rglob("*.png"))
+                + sum(1 for _ in dest_dir.rglob("*.JPEG"))
+                + sum(1 for _ in dest_dir.rglob("*.JPG"))
+                + sum(1 for _ in dest_dir.rglob("*.PNG"))
+            )
+            if img_count > 1000:
+                downloaded = True
+                print(f"  Kaggle download successful ({img_count} images extracted)")
+            else:
+                print("  [WARNING] Kaggle download produced too few images")
+        except ImportError:
+            print("  [WARNING] kaggle package not installed. Run: pip install kaggle")
+        except (Exception, SystemExit) as e:
+            print(f"  Kaggle method failed: {e}")
+
+    # ── Verify ──
+    if downloaded:
+        final_count = (
+            sum(1 for _ in dest_dir.rglob("*.jpg"))
+            + sum(1 for _ in dest_dir.rglob("*.png"))
+            + sum(1 for _ in dest_dir.rglob("*.JPEG"))
+            + sum(1 for _ in dest_dir.rglob("*.JPG"))
+            + sum(1 for _ in dest_dir.rglob("*.PNG"))
+        )
+        anno_count = sum(1 for _ in dest_dir.rglob("*.txt"))
+        print(f"\n  ExDark download complete!")
+        print(f"  Images: {final_count}")
+        print(f"  Annotation files: {anno_count}")
+        print(f"  Classes: {', '.join(EXDARK_CLASSES)}")
+        print(f"  Location: {dest_dir}")
+    else:
+        print("\n  [ERROR] All download methods failed for ExDark.")
+        print("  Manual download options:")
+        print("    1. GitHub: https://github.com/cs-chan/Exclusively-Dark-Image-Dataset/releases")
+        print("    2. Kaggle: https://www.kaggle.com/datasets/soumikrakshit/exclusively-dark-image-dataset")
+        print(f"    3. Extract to: {dest_dir}")
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -334,6 +475,7 @@ def main():
         "widerface": download_widerface,
         "rtts": download_rtts,
         "bdd100k": download_bdd100k,
+        "exdark": download_exdark,
     }
 
     # Allow downloading specific datasets via CLI args
