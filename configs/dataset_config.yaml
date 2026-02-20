@@ -41,6 +41,15 @@ datasets:
       - People
       - Table
 
+  foggy_cityscapes:
+    description: "FoggyCityscapes - synthetic fog on Cityscapes at 3 density levels"
+    path: ./datasets/foggy_cityscapes
+    source: "https://www.cityscapes-dataset.com/foggydownload/"
+    fog_levels:
+      - 0.005
+      - 0.01
+      - 0.02
+
 preprocessing:
   target_size: [640, 640]
   normalize: true

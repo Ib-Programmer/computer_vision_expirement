@@ -461,6 +461,73 @@ def download_exdark():
         print(f"    3. Extract to: {dest_dir}")
 
 
+# ── 6. FoggyCityscapes ─────────────────────────────────────────────────────
+
+def download_foggy_cityscapes():
+    """Download FoggyCityscapes dataset for foggy scene detection.
+
+    FoggyCityscapes applies synthetic fog to Cityscapes images at three
+    density levels (beta = 0.005, 0.01, 0.02).
+
+    Sources:
+      - Official: https://www.cityscapes-dataset.com/foggydownload/ (requires registration)
+      - Kaggle subset: yessicatuteja/foggy-cityscapes-image-dataset
+    """
+    print("\n" + "="*60)
+    print("DOWNLOADING: FoggyCityscapes")
+    print("="*60)
+
+    dest_dir = DATASETS_DIR / "foggy_cityscapes"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    existing = sum(1 for _ in dest_dir.rglob("*.png")) + sum(1 for _ in dest_dir.rglob("*.jpg"))
+    if existing > 500:
+        print(f"  [SKIP] FoggyCityscapes already downloaded ({existing} images found)")
+        return
+
+    downloaded = False
+
+    # Method 1: Kaggle dataset (subset, no registration needed)
+    try:
+        print("  Trying Kaggle (yessicatuteja/foggy-cityscapes-image-dataset)...")
+        import kaggle
+        kaggle.api.dataset_download_files(
+            "yessicatuteja/foggy-cityscapes-image-dataset",
+            path=str(dest_dir),
+            unzip=True,
+        )
+        img_count = sum(1 for _ in dest_dir.rglob("*.png")) + sum(1 for _ in dest_dir.rglob("*.jpg"))
+        if img_count > 100:
+            downloaded = True
+            print(f"  Kaggle download successful ({img_count} images)")
+    except ImportError:
+        print("  [WARNING] kaggle package not installed. Run: pip install kaggle")
+    except (Exception, SystemExit) as e:
+        print(f"  Kaggle method failed: {e}")
+
+    # Method 2: Direct synthesis from Cityscapes (if available)
+    if not downloaded:
+        cityscapes_dir = DATASETS_DIR / "cityscapes"
+        if cityscapes_dir.exists():
+            print("  Found Cityscapes locally. You can generate foggy images using:")
+            print("    https://github.com/sakaridis/fog_simulation_DBF")
+        else:
+            print("  No local Cityscapes found.")
+
+    if downloaded:
+        final_count = sum(1 for _ in dest_dir.rglob("*.png")) + sum(1 for _ in dest_dir.rglob("*.jpg"))
+        print(f"\n  FoggyCityscapes download complete!")
+        print(f"  Images: {final_count}")
+        print(f"  Location: {dest_dir}")
+    else:
+        print("\n  [INFO] FoggyCityscapes requires Cityscapes account for full dataset.")
+        print("  Options:")
+        print("    1. Register at: https://www.cityscapes-dataset.com/login/")
+        print("    2. Download foggy images: https://www.cityscapes-dataset.com/foggydownload/")
+        print("    3. Kaggle subset: https://www.kaggle.com/datasets/yessicatuteja/foggy-cityscapes-image-dataset")
+        print(f"    4. Extract to: {dest_dir}")
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -476,6 +543,7 @@ def main():
         "rtts": download_rtts,
         "bdd100k": download_bdd100k,
         "exdark": download_exdark,
+        "foggy_cityscapes": download_foggy_cityscapes,
     }
 
     # Allow downloading specific datasets via CLI args
