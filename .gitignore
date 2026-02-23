@@ -31,6 +31,10 @@ Thumbs.db
 # Jupyter
 .ipynb_checkpoints/
 
+# Proposal/report documents
+*.doc
+*.docx
+
 # Model weights (download in Colab)
 *.pt
 *.pth
