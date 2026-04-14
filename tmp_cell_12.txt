@@ -1,0 +1,95 @@
+import pyiqa
+import time
+import numpy as np
+import pandas as pd
+from skimage.metrics import peak_signal_noise_ratio as compute_psnr
+from skimage.metrics import structural_similarity as compute_ssim
+
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+niqe_metric = pyiqa.create_metric('niqe', device=device)
+
+def evaluate_no_ref(img_bgr):
+    """NIQE (no-reference): lower = better."""
+    t = torch.from_numpy(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+    return niqe_metric(t.to(device)).item()
+
+def evaluate_ref(enhanced_bgr, clean_bgr):
+    """PSNR and SSIM against clean reference (higher = better)."""
+    enh = cv2.cvtColor(enhanced_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
+    ref = cv2.cvtColor(clean_bgr,    cv2.COLOR_BGR2RGB).astype(np.float32)
+    if enh.shape != ref.shape:
+        enh = cv2.resize(cv2.cvtColor(enhanced_bgr, cv2.COLOR_BGR2RGB),
+                         (ref.shape[1], ref.shape[0])).astype(np.float32)
+    p = compute_psnr(ref, enh, data_range=255)
+    s = compute_ssim(ref, enh, channel_axis=2, data_range=255)
+    return p, s
+
+models = {
+    'Zero-DCE++': enhance_zero_dce,
+    'Restormer':  enhance_restormer,
+    'FFA-Net':    enhance_ffanet,
+}
+
+all_results = {name: {'psnr': [], 'ssim': [], 'niqe': [], 'niqe_delta': [], 'latency': []}
+               for name in models}
+
+# ── Part A: PSNR / SSIM on synthetic paired images ──────────────────────────
+n_pairs = min(len(synthetic_pairs), 30)
+print(f'Part A: Reference metrics (PSNR/SSIM) on {n_pairs} synthetic pairs...')
+
+for clean_bgr, deg_bgr, cond in synthetic_pairs[:n_pairs]:
+    for name, enhance_fn in models.items():
+        try:
+            start = time.time()
+            enhanced = enhance_fn(deg_bgr)
+            lat = (time.time() - start) * 1000
+            if enhanced.shape[:2] != clean_bgr.shape[:2]:
+                enhanced = cv2.resize(enhanced, (clean_bgr.shape[1], clean_bgr.shape[0]))
+            p, s = evaluate_ref(enhanced, clean_bgr)
+            all_results[name]['psnr'].append(p)
+            all_results[name]['ssim'].append(s)
+            all_results[name]['latency'].append(lat)
+        except Exception as e:
+            pass
+
+# ── Part B: NIQE on real degraded images ────────────────────────────────────
+n_real = min(30, len(all_test_images))
+print(f'Part B: No-reference metric (NIQE) on {n_real} real degraded images...')
+
+for idx, (path, img) in enumerate(all_test_images[:n_real]):
+    if (idx + 1) % 10 == 0:
+        print(f'  {idx+1}/{n_real}...')
+    orig_niqe = evaluate_no_ref(img)
+    for name, enhance_fn in models.items():
+        try:
+            enhanced = enhance_fn(img)
+            if enhanced.shape[:2] != img.shape[:2]:
+                enhanced = cv2.resize(enhanced, (img.shape[1], img.shape[0]))
+            enh_niqe = evaluate_no_ref(enhanced)
+            all_results[name]['niqe'].append(enh_niqe)
+            all_results[name]['niqe_delta'].append(enh_niqe - orig_niqe)
+        except Exception as e:
+            pass
+
+# ── Build comparison table ───────────────────────────────────────────────────
+rows = []
+for name in models:
+    r = all_results[name]
+    rows.append({
+        'Model': name,
+        'PSNR (dB)': round(np.mean(r['psnr']), 2) if r['psnr'] else 'N/A',
+        'SSIM': round(np.mean(r['ssim']), 4) if r['ssim'] else 'N/A',
+        'NIQE': round(np.mean(r['niqe']), 2) if r['niqe'] else 'N/A',
+        'NIQE Delta': round(np.mean(r['niqe_delta']), 2) if r['niqe_delta'] else 'N/A',
+        'Latency (ms)': round(np.mean(r['latency']), 1) if r['latency'] else 'N/A',
+    })
+
+evaluation_df = pd.DataFrame(rows)
+print('\n' + '=' * 70)
+print('ENHANCEMENT MODEL COMPARISON')
+print('PSNR/SSIM: on synthetic pairs (higher=better)')
+print('NIQE: on real degraded images (lower=better) | Delta: vs original')
+print('=' * 70)
+print(evaluation_df.to_string(index=False))
+evaluation_df.to_csv(f'{RESULTS_DIR}/enhancement_benchmark.csv', index=False)
+print(f'\nSaved to: {RESULTS_DIR}/enhancement_benchmark.csv')

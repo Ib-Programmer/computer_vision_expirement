@@ -1,0 +1,164 @@
+# ── Zero-DCE++ (Low-Light Enhancement) ──
+# PRIMARY:  download official pretrained weights (best quality, fast)
+# FALLBACK: train on LOL training set (485 real low-light images, NOT test data)
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision import transforms
+import os, glob as _glob, shutil
+
+class CSDN(nn.Module):
+    def __init__(self, in_ch, out_ch):
+        super().__init__()
+        self.depth_conv = nn.Conv2d(in_ch, in_ch, 3, 1, 1, groups=in_ch)
+        self.point_conv = nn.Conv2d(in_ch, out_ch, 1)
+    def forward(self, x):
+        return self.point_conv(self.depth_conv(x))
+
+class ZeroDCEpp(nn.Module):
+    def __init__(self, scale_factor=1):
+        super().__init__()
+        n = 32
+        self.relu = nn.ReLU(inplace=True)
+        self.scale_factor = scale_factor
+        self.e_conv1 = CSDN(3, n);  self.e_conv2 = CSDN(n, n)
+        self.e_conv3 = CSDN(n, n);  self.e_conv4 = CSDN(n, n)
+        self.e_conv5 = CSDN(n*2, n); self.e_conv6 = CSDN(n*2, n)
+        self.e_conv7 = CSDN(n*2, 24)
+
+    def forward(self, x):
+        xd = F.interpolate(x, scale_factor=1/self.scale_factor,
+                           mode='bilinear', align_corners=True) if self.scale_factor != 1 else x
+        x1 = self.relu(self.e_conv1(xd))
+        x2 = self.relu(self.e_conv2(x1))
+        x3 = self.relu(self.e_conv3(x2))
+        x4 = self.relu(self.e_conv4(x3))
+        x5 = self.relu(self.e_conv5(torch.cat([x3, x4], 1)))
+        x6 = self.relu(self.e_conv6(torch.cat([x2, x5], 1)))
+        x_r = torch.tanh(self.e_conv7(torch.cat([x1, x6], 1)))
+        if self.scale_factor != 1:
+            x_r = F.interpolate(x_r, size=x.shape[2:], mode='bilinear', align_corners=True)
+        enhanced = x
+        for curve in torch.split(x_r, 3, dim=1):
+            enhanced = enhanced + curve * (torch.pow(enhanced, 2) - enhanced)
+        return enhanced, x_r
+
+# All 4 losses from the original Zero-DCE paper
+def spatial_consistency_loss(enhanced, original, k=4):
+    pool = nn.AvgPool2d(k)
+    return torch.mean(torch.pow(pool(enhanced.mean(1, keepdim=True)) -
+                                pool(original.mean(1, keepdim=True)), 2))
+
+def color_constancy_loss(img):
+    m = torch.mean(img, dim=[2, 3])
+    return torch.mean((m[:,0]-m[:,1])**2 + (m[:,0]-m[:,2])**2 + (m[:,1]-m[:,2])**2)
+
+def exposure_loss(img, target_E=0.6):
+    return torch.mean((F.avg_pool2d(img, 16) - target_E)**2)
+
+def tv_loss(x_r):
+    return (torch.mean(torch.abs(x_r[:,:,:,:-1] - x_r[:,:,:,1:])) +
+            torch.mean(torch.abs(x_r[:,:,:-1,:] - x_r[:,:,1:,:])))
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+zero_dce = ZeroDCEpp(scale_factor=1).to(device)
+os.makedirs('weights', exist_ok=True)
+zdce_wt = 'weights/zero_dce_pp.pth'
+pretrained_loaded = False
+
+# Method 1: official pretrained weights via gdown (Google Drive)
+if not os.path.exists(zdce_wt):
+    try:
+        import gdown
+        print("Downloading Zero-DCE++ pretrained weights (Google Drive)...")
+        gdown.download(id='1HHBkHisTUWfGJvQiIHGgkiPxNFbAbkxE', output=zdce_wt, quiet=False)
+    except Exception as e:
+        print(f"  gdown failed: {e}")
+
+# Method 2: Hugging Face hub
+if not os.path.exists(zdce_wt) or os.path.getsize(zdce_wt) < 10000:
+    try:
+        from huggingface_hub import hf_hub_download
+        print("Downloading Zero-DCE++ weights from Hugging Face...")
+        p = hf_hub_download(repo_id='czczup/zero-dce-plus-plus',
+                            filename='Epoch99.pth', local_dir='weights')
+        shutil.copy(p, zdce_wt)
+    except Exception as e:
+        print(f"  HuggingFace failed: {e}")
+
+# Load pretrained if available
+if os.path.exists(zdce_wt) and os.path.getsize(zdce_wt) > 10000:
+    try:
+        ckpt = torch.load(zdce_wt, map_location=device)
+        state = ckpt.get('model', ckpt.get('state_dict', ckpt))
+        zero_dce.load_state_dict(state, strict=False)
+        zero_dce.eval()
+        pretrained_loaded = True
+        print(f"Zero-DCE++ pretrained weights loaded! Params: {sum(p.numel() for p in zero_dce.parameters()):,}")
+    except Exception as e:
+        print(f"  Load failed ({e}), falling back to training...")
+
+# Fallback: train on LOL dataset (485 real low-light images) — NOT on test data
+if not pretrained_loaded:
+    print("\nFallback: downloading LOL training dataset (485 low-light images)...")
+    lol_dir = '/content/LOL/our485/low'
+    if not os.path.exists(lol_dir):
+        try:
+            import gdown
+            gdown.download_folder(
+                'https://drive.google.com/drive/folders/1L-kqSolgtUhUpDYNVvRfRkNDGHOUzS6W',
+                output='/content/LOL/', quiet=False)
+        except Exception as e:
+            print(f"  LOL download failed: {e}")
+
+    train_images = []
+    for d in [lol_dir, '/content/LOL']:
+        if os.path.exists(d):
+            for p in (_glob.glob(f'{d}/**/*.png', recursive=True) +
+                      _glob.glob(f'{d}/**/*.jpg', recursive=True)):
+                img = cv2.imread(p)
+                if img is not None:
+                    train_images.append((p, img))
+            if train_images:
+                print(f"  Loaded {len(train_images)} LOL images from {d}")
+                break
+
+    # If LOL unavailable, use ExDark TRAIN split (explicitly not test split)
+    if not train_images:
+        print("  LOL unavailable; using ExDark train split...")
+        train_images = load_dataset_images(DATASETS_DIR, 'exdark', split='train', max_samples=300)
+        if not train_images:
+            train_images = load_dataset_images(DATASETS_DIR, 'exdark', split='', max_samples=300)
+        print(f"  Using {len(train_images)} ExDark images.")
+
+    tf = transforms.Compose([transforms.ToPILImage(), transforms.Resize((256, 256)),
+                              transforms.ToTensor()])
+    opt = torch.optim.Adam(zero_dce.parameters(), lr=1e-4, weight_decay=1e-4)
+    zero_dce.train()
+    print(f"Training Zero-DCE++ on {len(train_images)} images ({device})...")
+    for epoch in range(100):
+        total = 0.0
+        for _, img in train_images:
+            t = tf(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)).unsqueeze(0).to(device)
+            enh, curves = zero_dce(t)
+            loss = (1.0*spatial_consistency_loss(enh, t) +
+                    10.0*exposure_loss(enh) +
+                    5.0*color_constancy_loss(enh) +
+                    200.0*tv_loss(curves))
+            opt.zero_grad(); loss.backward(); opt.step()
+            total += loss.item()
+        if (epoch+1) % 20 == 0:
+            print(f"  Epoch {epoch+1}/100  Loss: {total/max(len(train_images),1):.4f}")
+    zero_dce.eval()
+    os.makedirs(CKPT_DIR, exist_ok=True)
+    torch.save(zero_dce.state_dict(), f'{CKPT_DIR}/zero_dce_pp_finetuned.pth')
+    print("Zero-DCE++ trained and checkpoint saved.")
+
+def enhance_zero_dce(img_bgr):
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    t = transforms.ToTensor()(img_rgb).unsqueeze(0).to(device)
+    with torch.no_grad():
+        enhanced, _ = zero_dce(t)
+    out = enhanced.squeeze(0).cpu().clamp(0,1).permute(1,2,0).numpy()
+    return cv2.cvtColor((out*255).astype('uint8'), cv2.COLOR_RGB2BGR)
