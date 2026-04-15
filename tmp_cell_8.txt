@@ -112,25 +112,42 @@ if not pretrained_loaded:
         except Exception as e:
             print(f"  LOL download failed: {e}")
 
+    # Search in order: LOL official -> RTTS (always downloaded) -> ExDark
     train_images = []
-    for d in [lol_dir, '/content/LOL']:
-        if os.path.exists(d):
-            for p in (_glob.glob(f'{d}/**/*.png', recursive=True) +
-                      _glob.glob(f'{d}/**/*.jpg', recursive=True)):
-                img = cv2.imread(p)
-                if img is not None:
-                    train_images.append((p, img))
-            if train_images:
-                print(f"  Loaded {len(train_images)} LOL images from {d}")
-                break
+    candidate_dirs = [
+        lol_dir,
+        '/content/LOL',
+        '/content/LOL/our485/low',
+        # RTTS is downloaded by Cell 02 — reliable source for zero-reference training
+        '/content/computer_vision_expirement/datasets/rtts',
+        '/content/computer_vision_expirement/datasets/rtts_processed/train',
+        f'{DATASETS_DIR}/rtts',
+        f'{DATASETS_DIR}/rtts_processed/train',
+    ]
+    for d in candidate_dirs:
+        if not os.path.exists(d):
+            continue
+        found = (_glob.glob(f'{d}/**/*.png', recursive=True) +
+                 _glob.glob(f'{d}/**/*.jpg', recursive=True))
+        for p in found[:300]:
+            img = cv2.imread(p)
+            if img is not None:
+                train_images.append((p, img))
+        if train_images:
+            print(f"  Loaded {len(train_images)} training images from {d}")
+            break
 
-    # If LOL unavailable, use ExDark TRAIN split (explicitly not test split)
+    # If still empty, use ExDark train split
     if not train_images:
-        print("  LOL unavailable; using ExDark train split...")
+        print("  Trying ExDark train split...")
         train_images = load_dataset_images(DATASETS_DIR, 'exdark', split='train', max_samples=300)
         if not train_images:
             train_images = load_dataset_images(DATASETS_DIR, 'exdark', split='', max_samples=300)
         print(f"  Using {len(train_images)} ExDark images.")
+
+    if not train_images:
+        print("  [WARN] No training images found — Zero-DCE++ will use random init.")
+        print("  Tip: ensure Cell 02 (download+preprocess) ran before this cell.")
 
     tf = transforms.Compose([transforms.ToPILImage(), transforms.Resize((256, 256)),
                               transforms.ToTensor()])

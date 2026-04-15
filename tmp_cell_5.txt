@@ -91,19 +91,21 @@ if not exdark_images:
         from huggingface_hub import snapshot_download
         repo_dir = snapshot_download(repo_id='geekyrakshit/LoL-Dataset',
                                      repo_type='dataset', ignore_patterns=['*.csv', '*.json'])
-        # Collect all images in the repo; prefer paths containing 'low'
+        # Collect ALL image files — repo structure varies, don't filter by path name
         all_repo_imgs = []
         for ext in ['jpg', 'png', 'JPG', 'PNG', 'jpeg', 'JPEG']:
             all_repo_imgs.extend(glob.glob(f'{repo_dir}/**/*.{ext}', recursive=True))
-        # Prefer low-light images (path contains 'low' but not 'highlight')
-        low_paths = [p for p in all_repo_imgs
-                     if 'low' in p.lower() and 'highlight' not in p.lower()]
+        # Prefer low-light images (path contains 'low' but not 'high')
+        low_paths = [p for p in all_repo_imgs if 'low' in p.lower() and '/high' not in p.lower()]
         chosen = (low_paths if low_paths else all_repo_imgs)[:200]
         exdark_images = []
         for p in chosen:
             img = cv2.imread(p)
             if img is not None:
                 exdark_images.append((p, img))
+        if not exdark_images and all_repo_imgs:
+            print(f"  NOTE: snapshot has {len(all_repo_imgs)} files but cv2 could not read them.")
+            print(f"  Sample paths: {all_repo_imgs[:3]}")
         print(f"  HuggingFace LOL: {len(exdark_images)} low-light images")
     except Exception as e:
         print(f"  HuggingFace LoL failed: {e}")

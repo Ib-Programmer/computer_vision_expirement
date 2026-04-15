@@ -20,4 +20,5 @@ for name, enhance_fn in models.items():
 
 print('Enhanced outputs saved to Drive:')
 for name, n in saved.items():
-    print(f'  {name}: {n} images -> {model_dir}')
+    _dir = f'{ENHANCED_DIR}/{name.replace("+","plus").replace(" ","_")}'
+    print(f'  {name}: {n} images -> {_dir}')
