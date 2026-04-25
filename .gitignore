@@ -31,6 +31,11 @@ Thumbs.db
 # Jupyter
 .ipynb_checkpoints/
 
+# Scratch & debug artifacts
+_tmp/
+tmp_cell_*.txt
+*.pkl
+
 # Proposal/report documents
 *.doc
 *.docx
