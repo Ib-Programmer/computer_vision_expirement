@@ -249,20 +249,44 @@ def preprocess_bdd100k():
         return
 
     # ── Find label JSON files ──
+    # BDD100K ships in two layouts:
+    #   (a) consolidated:   det_{split}.json or bdd100k_labels_images_{split}.json
+    #   (b) per-image:      labels/100k/{split}/<image_id>.json   (archive.org mirror)
+    # The archive.org bdd100k_labels.zip uses layout (b), so we check both.
     label_files = {}
+    per_image_dirs = {}
     for split in ['train', 'val']:
-        # Try multiple possible locations
-        candidates = (
+        consolidated = (
             list(src_dir.rglob(f'det_{split}.json')) +
             list(src_dir.rglob(f'bdd100k_labels_images_{split}.json'))
         )
-        if candidates:
-            label_files[split] = candidates[0]
-            print(f"  Found {split} labels: {candidates[0]}")
+        if consolidated:
+            label_files[split] = consolidated[0]
+            print(f"  Found {split} labels (consolidated): {consolidated[0]}")
+            continue
 
-    if not label_files:
+        # Per-image fallback: any directory named `<split>` under labels/ that
+        # contains *.json files. Pick the one with the most JSONs (avoids
+        # picking up empty/test directories with the same name).
+        candidates = []
+        for d in src_dir.rglob(split):
+            if not d.is_dir():
+                continue
+            n = sum(1 for _ in d.glob('*.json'))
+            if n > 0:
+                candidates.append((n, d))
+        if candidates:
+            candidates.sort(reverse=True)
+            n, best = candidates[0]
+            per_image_dirs[split] = best
+            print(f"  Found {split} labels (per-image): {best} ({n} JSON files)")
+
+    if not label_files and not per_image_dirs:
         print("  [ERROR] No BDD100K label JSON files found!")
-        print("  Searched for: det_train.json, bdd100k_labels_images_train.json")
+        print("  Searched for:")
+        print("    - det_{train,val}.json")
+        print("    - bdd100k_labels_images_{train,val}.json")
+        print("    - labels/100k/{train,val}/*.json (per-image)")
         print("  Make sure bdd100k_labels.zip was downloaded and extracted.")
         return
 
@@ -301,7 +325,9 @@ def preprocess_bdd100k():
     total_labels = 0
 
     for split in ['train', 'val']:
-        if split not in label_files or split not in img_dirs:
+        has_consolidated = split in label_files
+        has_per_image = split in per_image_dirs
+        if not (has_consolidated or has_per_image) or split not in img_dirs:
             print(f"  [SKIP] {split}: missing labels or images")
             continue
 
@@ -311,11 +337,32 @@ def preprocess_bdd100k():
         img_out.mkdir(parents=True, exist_ok=True)
         lbl_out.mkdir(parents=True, exist_ok=True)
 
-        # Load JSON labels
+        # Load annotations: yield {'name': str, 'labels': list} dicts in a
+        # uniform shape regardless of source format.
         print(f"\n  Loading {split} labels...")
-        with open(label_files[split], 'r') as f:
-            annotations = json.load(f)
-        print(f"  {len(annotations)} annotations loaded")
+        if has_consolidated:
+            with open(label_files[split], 'r') as f:
+                annotations = json.load(f)
+            print(f"  {len(annotations)} annotations loaded (consolidated)")
+        else:
+            json_files = sorted(per_image_dirs[split].glob('*.json'))
+            print(f"  {len(json_files)} per-image annotation files found")
+            def _iter_per_image():
+                for jp in json_files:
+                    try:
+                        with open(jp, 'r') as f:
+                            data = json.load(f)
+                    except (json.JSONDecodeError, OSError):
+                        continue
+                    # Per-image schema: {'name': '<id>', 'frames': [{'objects': [...]}]}
+                    name = data.get('name', jp.stem)
+                    if not name.endswith('.jpg'):
+                        name = name + '.jpg'
+                    frames = data.get('frames') or []
+                    objs = frames[0].get('objects', []) if frames else data.get('labels', [])
+                    yield {'name': name, 'labels': objs}
+            annotations = list(_iter_per_image())
+            print(f"  {len(annotations)} annotations loaded (per-image)")
 
         converted = 0
         skipped = 0
@@ -332,7 +379,9 @@ def preprocess_bdd100k():
                 skipped += 1
                 continue
 
-            # Convert labels to YOLO format
+            # Convert labels to YOLO format. Per-image schema uses 'category'
+            # at the top level (same as consolidated), so the loop body is
+            # unchanged for both formats.
             labels = ann.get('labels', [])
             yolo_lines = []
 

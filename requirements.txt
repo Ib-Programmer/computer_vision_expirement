@@ -1,17 +1,34 @@
-torch
-torchvision
-torchaudio
-opencv-python
-albumentations
-matplotlib
-numpy
-pandas
-scikit-image
-Pillow
-tqdm
-gdown
-kaggle
-ultralytics
-onnx
-onnxruntime
-pyiqa
+# Pinned for reproducibility — see run_pipeline.py
+# Versions chosen to match Colab runtime (Apr–May 2026, CUDA 12.1).
+# If Colab moves to CUDA 12.4+, bump onnxruntime-gpu to 1.20.x.
+
+torch==2.4.1
+torchvision==0.19.1
+torchaudio==2.4.1
+
+# Image / data
+opencv-python==4.10.0.84
+albumentations==2.0.8
+matplotlib==3.9.2
+numpy==1.26.4
+pandas==2.2.3
+scikit-image==0.24.0
+Pillow==10.4.0
+tqdm==4.66.5
+
+# Dataset download
+gdown==5.2.0
+kaggle==1.6.17
+huggingface_hub==0.25.2
+
+# Detection / face
+ultralytics==8.4.41
+insightface==0.7.3
+faiss-cpu==1.8.0.post1
+
+# Inference / quality
+onnx==1.16.2
+onnxruntime==1.18.1
+onnxruntime-gpu==1.18.1
+pyiqa==0.1.13
+einops==0.8.0

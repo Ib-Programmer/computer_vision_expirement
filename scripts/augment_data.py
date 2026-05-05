@@ -27,16 +27,44 @@ JPEG_QUALITY = 90       # save disk space on HDD
 
 
 # ── Augmentation Transforms ─────────────────────────────────────────────────
+# Albumentations migrated to the 2.x API in 2024:
+#   RandomFog: fog_coef_lower/upper -> fog_coef_range=(lo, hi)
+#   RandomRain: slant_lower/upper   -> slant_range=(lo, hi)
+#   GaussNoise: var_limit           -> std_range=(lo, hi) (sigma, NOT variance — convert)
+# We use *_range with try/except so this script keeps working if albumentations
+# is downgraded to 1.x (kwargs are accepted but ignored ⇒ would silently use
+# defaults, hence the assertion check at the bottom of this file).
+
+def _make_fog(coef_range=(0.3, 0.7), alpha=0.08, p=1.0):
+    try:
+        return A.RandomFog(fog_coef_range=coef_range, alpha_coef=alpha, p=p)
+    except TypeError:
+        return A.RandomFog(fog_coef_lower=coef_range[0], fog_coef_upper=coef_range[1],
+                           alpha_coef=alpha, p=p)
+
+
+def _make_rain(slant_range=(-10, 10), p=1.0):
+    common = dict(drop_length=20, drop_width=1, drop_color=(200, 200, 200),
+                  blur_value=3, brightness_coefficient=0.7, p=p)
+    try:
+        return A.RandomRain(slant_range=slant_range, **common)
+    except TypeError:
+        return A.RandomRain(slant_lower=slant_range[0], slant_upper=slant_range[1], **common)
+
+
+def _make_gauss_noise(std_range=(3.0, 6.5), p=0.3):
+    # 2.x: std_range (sigma in pixels). 1.x: var_limit (variance).
+    # Map: var_limit ≈ (std**2, std**2) ⇒ std_range=(sqrt(lo), sqrt(hi))
+    # Original spec: var_limit=(10.0, 40.0) → std=(3.16, 6.32) ≈ (3.0, 6.5)
+    try:
+        return A.GaussNoise(std_range=std_range, p=p)
+    except TypeError:
+        var_lo, var_hi = std_range[0]**2, std_range[1]**2
+        return A.GaussNoise(var_limit=(var_lo, var_hi), p=p)
+
 
 def get_fog_transform():
-    return A.Compose([
-        A.RandomFog(
-            fog_coef_lower=0.3,
-            fog_coef_upper=0.7,
-            alpha_coef=0.08,
-            p=1.0
-        )
-    ])
+    return A.Compose([_make_fog((0.3, 0.7), 0.08, 1.0)])
 
 
 def get_low_light_transform():
@@ -44,45 +72,35 @@ def get_low_light_transform():
         A.RandomBrightnessContrast(
             brightness_limit=(-0.5, -0.2),
             contrast_limit=(-0.3, 0.0),
-            p=1.0
+            p=1.0,
         ),
         A.RandomGamma(gamma_limit=(150, 300), p=0.7),
     ])
 
 
 def get_motion_blur_transform():
-    return A.Compose([
-        A.MotionBlur(blur_limit=(7, 15), p=1.0)
-    ])
+    return A.Compose([A.MotionBlur(blur_limit=(7, 15), p=1.0)])
 
 
 def get_rain_transform():
-    return A.Compose([
-        A.RandomRain(
-            slant_lower=-10,
-            slant_upper=10,
-            drop_length=20,
-            drop_width=1,
-            drop_color=(200, 200, 200),
-            blur_value=3,
-            brightness_coefficient=0.7,
-            p=1.0
-        )
-    ])
+    return A.Compose([_make_rain((-10, 10), 1.0)])
 
 
 def get_combined_transform():
     return A.Compose([
         A.OneOf([
-            A.RandomFog(fog_coef_lower=0.2, fog_coef_upper=0.5, alpha_coef=0.08, p=1.0),
-            A.RandomRain(slant_lower=-10, slant_upper=10, drop_length=20, drop_width=1,
-                         drop_color=(200, 200, 200), blur_value=3, brightness_coefficient=0.7, p=1.0),
+            _make_fog((0.2, 0.5), 0.08, 1.0),
+            _make_rain((-10, 10), 1.0),
         ], p=0.5),
         A.OneOf([
-            A.RandomBrightnessContrast(brightness_limit=(-0.4, -0.1), contrast_limit=(-0.2, 0.0), p=1.0),
-            A.MotionBlur(blur_limit=(7, 12), p=1.0),
+            A.RandomBrightnessContrast(
+                brightness_limit=(-0.4, -0.1),
+                contrast_limit=(-0.2, 0.0),
+                p=1.0,
+            ),
+            A.MotionBlur(blur_limit=(7, 13), p=1.0),  # odd kernel sizes only in 2.x
         ], p=0.5),
-        A.GaussNoise(var_limit=(10.0, 40.0), p=0.3),
+        _make_gauss_noise((3.0, 6.5), 0.3),
     ])
 
 
