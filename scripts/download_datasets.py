@@ -266,7 +266,20 @@ def download_rtts():
 # ── 4. BDD100K ──────────────────────────────────────────────────────────────
 
 def download_bdd100k():
-    """Download BDD100K from archive.org mirror (~6.5GB images + 147MB labels)."""
+    """Download BDD100K with multi-source fallback and integrity validation.
+
+    Phase 3 outdoor detection requires this dataset, so this function hard-fails
+    if all sources fail (rather than silently warning and letting Phase 3 fall
+    back to COCO128, which is not defensible as outdoor-scene detection).
+
+    Sources tried in order:
+      1. Kaggle: solesensei/solesensei_bdd100k (single archive, images + labels)
+      2. archive.org: bdd100k_images.zip + bdd100k_labels.zip
+
+    Each archive.org zip is size-checked and header-validated before extraction —
+    the prior `size > 10000 bytes` gate accepted HTML error pages as valid 6.5 GB
+    files, which is what was causing Phase 3 to silently lose its dataset.
+    """
     print("\n" + "="*60)
     print("DOWNLOADING: BDD100K (Berkeley DeepDrive)")
     print("="*60)
@@ -274,52 +287,102 @@ def download_bdd100k():
     dest_dir = DATASETS_DIR / "bdd100k"
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    if sum(1 for _ in dest_dir.rglob("*.jpg")) > 1000:
-        print("  [SKIP] BDD100K images already downloaded")
+    def _state():
+        imgs = sum(1 for _ in dest_dir.rglob("*.jpg"))
+        jsons = sum(1 for _ in dest_dir.rglob("*.json"))
+        return imgs, jsons
+
+    img_count, json_count = _state()
+    if img_count > 10000 and json_count > 0:
+        print(f"  [SKIP] BDD100K already present ({img_count} images, {json_count} JSONs)")
         return
 
-    # Archive.org mirror - no registration needed
+    # ── Method 1: Kaggle (preferred — single archive, both images and labels) ──
+    try:
+        print("  Trying Kaggle (solesensei/solesensei_bdd100k)...")
+        import kaggle
+        kaggle.api.dataset_download_files(
+            "solesensei/solesensei_bdd100k",
+            path=str(dest_dir),
+            unzip=True,
+        )
+        img_count, json_count = _state()
+        if img_count > 10000 and json_count > 0:
+            print(f"  Kaggle download successful ({img_count} images, {json_count} JSONs)")
+            print(f"  Location: {dest_dir}")
+            return
+        print(f"  Kaggle returned {img_count} images, {json_count} JSONs — falling back to archive.org")
+    except ImportError:
+        print("  [WARNING] kaggle package not installed. Run: pip install kaggle")
+    except (Exception, SystemExit) as e:
+        print(f"  Kaggle method failed: {e}")
+
+    # ── Method 2: archive.org (validate size + zip header before extract) ──
     files = {
         "bdd100k_images.zip": {
             "url": "https://archive.org/download/bdd100k/bdd100k_images.zip",
-            "desc": "BDD100K Images (~6.5GB)",
+            "min_bytes": 5 * 1024**3,   # 5 GB floor (actual ~6.5 GB)
         },
         "bdd100k_labels.zip": {
             "url": "https://archive.org/download/bdd100k/bdd100k_labels.zip",
-            "desc": "BDD100K Labels (~147MB)",
+            "min_bytes": 50 * 1024**2,  # 50 MB floor (actual ~147 MB)
         },
     }
 
     for filename, info in files.items():
         archive_path = dest_dir / filename
 
-        if archive_path.exists():
-            print(f"  [SKIP] {filename} already downloaded")
-        else:
-            print(f"  Downloading {info['desc']}...")
+        # Drop partial/corrupt downloads — the prior 10 KB gate let HTML
+        # error pages pass as valid archives.
+        if archive_path.exists() and archive_path.stat().st_size < info["min_bytes"]:
+            print(f"  Removing undersized {filename} ({archive_path.stat().st_size} bytes)")
+            archive_path.unlink()
+
+        if not archive_path.exists():
+            print(f"  Downloading {filename} from archive.org...")
             try:
                 download_file(info["url"], archive_path, desc=filename)
             except Exception as e:
-                print(f"  [ERROR] Failed to download {filename}: {e}")
+                print(f"  [ERROR] {filename} download failed: {e}")
                 continue
 
-        # Extract
-        if archive_path.exists() and archive_path.stat().st_size > 10000:
-            try:
-                extract_zip(archive_path, dest_dir)
-            except Exception as e:
-                print(f"  [ERROR] Failed to extract {filename}: {e}")
+        actual = archive_path.stat().st_size if archive_path.exists() else 0
+        if actual < info["min_bytes"]:
+            print(f"  [ERROR] {filename}: {actual} bytes < {info['min_bytes']} floor — likely error page")
+            if archive_path.exists():
+                archive_path.unlink()
+            continue
 
-    # Verify
-    # Verify - archive.org extracts to bdd100k/bdd100k/images/ or bdd100k/images/
-    img_count = sum(1 for _ in dest_dir.rglob("*.jpg"))
-    if img_count > 100:
-        print(f"  BDD100K download complete! ({img_count} images found)")
+        # Header validation catches HTML-wrapped-as-zip without the cost of testzip()
+        try:
+            with zipfile.ZipFile(archive_path) as z:
+                z.namelist()
+        except zipfile.BadZipFile:
+            print(f"  [ERROR] {filename} is not a valid zip archive")
+            archive_path.unlink()
+            continue
+
+        try:
+            extract_zip(archive_path, dest_dir)
+        except Exception as e:
+            print(f"  [ERROR] {filename} extraction failed: {e}")
+
+    # ── Final verification — hard fail if dataset isn't usable ──
+    img_count, json_count = _state()
+    if img_count > 10000 and json_count > 0:
+        print(f"  BDD100K ready: {img_count} images, {json_count} JSON files")
         print(f"  Location: {dest_dir}")
-    else:
-        print("  [WARNING] Download may have failed. Manual fallback:")
-        print("    https://archive.org/download/bdd100k")
-        print(f"    Extract to: {dest_dir}")
+        return
+
+    raise RuntimeError(
+        f"BDD100K download failed across all sources "
+        f"(got {img_count} images, {json_count} JSON files). "
+        f"Phase 3 outdoor detection requires this dataset. Manual options:\n"
+        f"  1. Kaggle: kaggle datasets download -d solesensei/solesensei_bdd100k "
+        f"-p datasets/bdd100k --unzip\n"
+        f"  2. archive.org: https://archive.org/details/bdd100k\n"
+        f"  3. Official (registration): https://bdd-data.berkeley.edu/"
+    )
 
 
 # ── 5. LOL Dataset (Low-Light Object) ────────────────────────────────────────
