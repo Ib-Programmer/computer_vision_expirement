@@ -424,6 +424,14 @@ def download_exdark():
             local_dir=str(dest_dir / "lol_hf"),
             ignore_patterns=["*.csv", "*.json", "*.md"],
         )
+        # LoL on HuggingFace ships as lol_dataset.zip — snapshot_download
+        # only fetches files, it doesn't unpack archives. Without this step
+        # the *.png count below stays 0 and the function falsely falls back.
+        for zp in (dest_dir / "lol_hf").rglob("*.zip"):
+            try:
+                extract_zip(zp, dest_dir)
+            except Exception as e:
+                print(f"  [WARN] Failed to extract {zp.name}: {e}")
         img_count = sum(1 for _ in dest_dir.rglob("*.png")) + sum(1 for _ in dest_dir.rglob("*.jpg"))
         if img_count > 100:
             downloaded = True
