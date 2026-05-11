@@ -52,14 +52,16 @@ def _make_rain(slant_range=(-10, 10), p=1.0):
         return A.RandomRain(slant_lower=slant_range[0], slant_upper=slant_range[1], **common)
 
 
-def _make_gauss_noise(std_range=(3.0, 6.5), p=0.3):
-    # 2.x: std_range (sigma in pixels). 1.x: var_limit (variance).
-    # Map: var_limit ≈ (std**2, std**2) ⇒ std_range=(sqrt(lo), sqrt(hi))
-    # Original spec: var_limit=(10.0, 40.0) → std=(3.16, 6.32) ≈ (3.0, 6.5)
+def _make_gauss_noise(std_range=(0.012, 0.025), p=0.3):
+    # 2.x: std_range = sigma normalized to [0, 1] (fraction of 255).
+    # 1.x: var_limit = variance in pixel-space [0, 255**2].
+    # Original 1.x spec was var_limit=(10.0, 40.0) ⇒ std ≈ (3.16, 6.32) px
+    # ⇒ normalized ≈ (0.012, 0.025). Keep both APIs working via fallback.
     try:
         return A.GaussNoise(std_range=std_range, p=p)
     except TypeError:
-        var_lo, var_hi = std_range[0]**2, std_range[1]**2
+        var_lo = (std_range[0] * 255) ** 2
+        var_hi = (std_range[1] * 255) ** 2
         return A.GaussNoise(var_limit=(var_lo, var_hi), p=p)
 
 
@@ -100,7 +102,7 @@ def get_combined_transform():
             ),
             A.MotionBlur(blur_limit=(7, 13), p=1.0),  # odd kernel sizes only in 2.x
         ], p=0.5),
-        _make_gauss_noise((3.0, 6.5), 0.3),
+        _make_gauss_noise((0.012, 0.025), 0.3),
     ])
 
 
