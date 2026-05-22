@@ -13,6 +13,7 @@ matplotlib==3.9.2
 numpy==1.26.4
 pandas==2.2.3
 scikit-image==0.24.0
+scikit-learn==1.5.2   # fetch_lfw_people: primary LFW download path (Phase 1/4)
 Pillow==10.4.0
 tqdm==4.66.5
 
@@ -28,7 +29,9 @@ faiss-cpu==1.8.0.post1
 
 # Inference / quality
 onnx==1.16.2
-onnxruntime==1.18.1
+# onnxruntime-gpu also provides CPUExecutionProvider, so the CPU-only
+# `onnxruntime` package is redundant. Installing BOTH can clash and make
+# InsightFace silently fall back to CPU (missing the <100ms GPU target).
 onnxruntime-gpu==1.18.1
 pyiqa==0.1.13
 basicsr==1.4.2
