@@ -125,72 +125,103 @@ def download_lfw():
 # ── 2. WiderFace ────────────────────────────────────────────────────────────
 
 def download_widerface():
-    """Download WiderFace dataset via gdown (Google Drive)."""
+    """Download WiderFace from the Hugging Face mirror (CUHK-CSE/wider_face).
+
+    Google Drive (gdown) rate-limits aggressively and was the cause of empty
+    WiderFace downloads, so Hugging Face is now the PRIMARY source (gdown is
+    kept only as a fallback).
+
+    Phase 4 uses a PRETRAINED SCRFD detector, so only WIDER_val + the split
+    annotations are needed (~366 MB). WIDER_train.zip (~1.4 GB) is skipped by
+    default to respect the compute/disk budget; set the env var WIDERFACE_TRAIN=1
+    to also fetch it (only needed if you intend to train a detector yourself).
+    """
     print("\n" + "="*60)
-    print("DOWNLOADING: WiderFace")
+    print("DOWNLOADING: WiderFace (Hugging Face mirror)")
     print("="*60)
 
     dest_dir = DATASETS_DIR / "widerface"
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    if (dest_dir / "WIDER_train").exists() and (dest_dir / "WIDER_val").exists():
+    want_train = os.environ.get("WIDERFACE_TRAIN", "0") == "1"
+
+    # Files under data/ in the HF repo. Val + labels by default; train optional.
+    targets = ["WIDER_val.zip", "wider_face_split.zip"]
+    if want_train:
+        targets.append("WIDER_train.zip")
+
+    # Skip if the parts we need are already extracted.
+    needed = {"WIDER_val", "wider_face_split"} | ({"WIDER_train"} if want_train else set())
+    if all((dest_dir / n).exists() for n in needed):
         print("  [SKIP] WiderFace already downloaded and extracted")
         return
 
-    try:
-        import gdown
-    except ImportError:
-        print("  [ERROR] gdown not installed. Run: pip install gdown")
-        return
-
-    # Google Drive file IDs for WiderFace
-    files = {
+    HF_REPO = "CUHK-CSE/wider_face"
+    GDRIVE_IDS = {  # fallback only
         "WIDER_train.zip": "15hGDLhsx8bLgLcIRD5DhYt5iBxnjNF1M",
         "WIDER_val.zip": "1GUCogbp16PMGa39thoMMeWxp7Rp5oM8Q",
         "wider_face_split.zip": "1H68E4FCjjLdIny4Gp-6BFYNNSO9eClJq",
     }
 
-    # Hugging Face mirror for labels (Google Drive often rate-limits)
-    hf_labels_url = "https://huggingface.co/datasets/wider_face/resolve/main/data/wider_face_split.zip"
+    for filename in targets:
+        extracted_name = filename.replace(".zip", "")
+        if (dest_dir / extracted_name).exists():
+            print(f"  [SKIP] {extracted_name} already extracted")
+            continue
 
-    for filename, file_id in files.items():
-        output_path = dest_dir / filename
-        if output_path.exists():
-            print(f"  [SKIP] {filename} already exists")
-        else:
-            downloaded = False
+        src_zip = None
 
-            # For labels zip, try Hugging Face first (more reliable)
-            if filename == "wider_face_split.zip":
-                try:
-                    print(f"  Downloading {filename} from Hugging Face mirror...")
-                    download_file(hf_labels_url, output_path, desc=filename)
-                    if output_path.exists() and output_path.stat().st_size > 10000:
-                        downloaded = True
-                    else:
-                        if output_path.exists():
-                            output_path.unlink()
-                except Exception as e:
-                    print(f"  Hugging Face mirror failed: {e}")
+        # ── Method 1: Hugging Face hub (primary; resumable, cached, no auth) ──
+        try:
+            from huggingface_hub import hf_hub_download
+            print(f"  Downloading {filename} from Hugging Face ({HF_REPO})...")
+            src_zip = Path(hf_hub_download(repo_id=HF_REPO, repo_type="dataset",
+                                           filename=f"data/{filename}"))
+            print(f"    HF OK: {src_zip.stat().st_size / 1e6:.1f} MB")
+        except Exception as e:
+            print(f"    Hugging Face failed: {e}")
 
-            # Fallback to Google Drive
-            if not downloaded:
-                try:
-                    print(f"  Downloading {filename} from Google Drive...")
-                    gdown.download(id=file_id, output=str(output_path), quiet=False)
-                except Exception as e:
-                    print(f"  Google Drive download failed for {filename}: {e}")
+        # ── Method 2: gdown fallback (Google Drive, may be rate-limited) ──
+        if src_zip is None or not src_zip.exists():
+            try:
+                import gdown
+                out = dest_dir / filename
+                print(f"  Falling back to Google Drive for {filename}...")
+                gdown.download(id=GDRIVE_IDS[filename], output=str(out), quiet=False)
+                if out.exists() and out.stat().st_size > 100_000:
+                    src_zip = out
+            except Exception as e:
+                print(f"    Google Drive failed: {e}")
 
-        # Extract
-        if output_path.exists() and output_path.stat().st_size > 10000:
-            extracted_name = filename.replace(".zip", "")
-            if not (dest_dir / extracted_name).exists():
-                extract_zip(output_path, dest_dir)
-        elif not output_path.exists():
+        if src_zip is None or not src_zip.exists() or src_zip.stat().st_size < 100_000:
             print(f"  [WARNING] {filename} not downloaded - skipping extraction")
+            continue
 
-    print("  WiderFace download complete!")
+        # ── Validate (catch HTML-as-zip) then extract ──
+        try:
+            with zipfile.ZipFile(src_zip) as z:
+                z.namelist()
+        except zipfile.BadZipFile:
+            print(f"  [ERROR] {filename} is not a valid zip archive - skipping")
+            continue
+        extract_zip(src_zip, dest_dir)
+        # Free disk: drop the zip only if we wrote it into dest_dir (gdown path).
+        # The HF cache copy is left in place for resume/reuse.
+        if src_zip.parent == dest_dir:
+            try:
+                src_zip.unlink()
+            except OSError:
+                pass
+
+    # ── Verify ──
+    val_dir = dest_dir / "WIDER_val"
+    val_imgs = sum(1 for _ in val_dir.rglob("*.jpg")) if val_dir.exists() else 0
+    print(f"\n  WiderFace ready: WIDER_val images = {val_imgs}")
     print(f"  Location: {dest_dir}")
+    if val_imgs == 0:
+        print("  [WARNING] No WIDER_val images found. Manual fallback:")
+        print("    huggingface-cli download CUHK-CSE/wider_face data/WIDER_val.zip \\")
+        print("      --repo-type dataset --local-dir datasets/widerface")
 
 
 # ── 3. RTTS (Real-world Task-driven Testing Set) ────────────────────────────
