@@ -20,17 +20,14 @@ import shutil
 from pathlib import Path
 from tqdm import tqdm
 
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATASETS_DIR = BASE_DIR / "datasets"
-
 
 class DownloadProgressBar(tqdm):
     def update_to(self, b=1, bsize=1, tsize=None):
         if tsize is not None:
             self.total = tsize
         self.update(b * bsize - self.n)
-
 
 def download_file(url, dest_path, desc="Downloading"):
     """Download a file with progress bar."""
@@ -47,7 +44,6 @@ def download_file(url, dest_path, desc="Downloading"):
     print(f"  Saved to: {dest_path}")
     return dest_path
 
-
 def extract_zip(zip_path, extract_to):
     """Extract a zip archive."""
     print(f"  Extracting {zip_path.name}...")
@@ -55,16 +51,12 @@ def extract_zip(zip_path, extract_to):
         z.extractall(extract_to)
     print(f"  Extracted to: {extract_to}")
 
-
 def extract_tar(tar_path, extract_to):
     """Extract a tar/tar.gz archive."""
     print(f"  Extracting {tar_path.name}...")
     with tarfile.open(tar_path, 'r:*') as t:
         t.extractall(extract_to)
     print(f"  Extracted to: {extract_to}")
-
-
-# ── 1. LFW (Labeled Faces in the Wild) ──────────────────────────────────────
 
 def download_lfw():
     """Download LFW dataset (~173MB) via sklearn or gdown fallback."""
@@ -75,12 +67,10 @@ def download_lfw():
     dest_dir = DATASETS_DIR / "lfw"
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    # Check if already extracted
     if (dest_dir / "lfw").exists() and len(list((dest_dir / "lfw").glob("*"))) > 100:
         print("  [SKIP] LFW already downloaded and extracted")
         return
 
-    # Try sklearn fetch (handles mirrors automatically)
     try:
         print("  Trying sklearn.datasets.fetch_lfw_people...")
         from sklearn.datasets import fetch_lfw_people
@@ -92,7 +82,6 @@ def download_lfw():
     except Exception as e:
         print(f"  sklearn method failed: {e}")
 
-    # Fallback: gdown from Google Drive mirror
     try:
         import gdown
         print("  Trying Google Drive mirror...")
@@ -108,7 +97,6 @@ def download_lfw():
     except Exception as e:
         print(f"  gdown method failed: {e}")
 
-    # Fallback: direct URL (original server)
     print("  Trying original UMass server...")
     url = "http://vis-www.cs.umass.edu/lfw/lfw.tgz"
     archive_path = dest_dir / "lfw.tgz"
@@ -120,9 +108,6 @@ def download_lfw():
 
     print("  LFW download complete!")
     print(f"  Location: {dest_dir / 'lfw'}")
-
-
-# ── 2. WiderFace ────────────────────────────────────────────────────────────
 
 def download_widerface():
     """Download WiderFace from the Hugging Face mirror (CUHK-CSE/wider_face).
@@ -145,19 +130,17 @@ def download_widerface():
 
     want_train = os.environ.get("WIDERFACE_TRAIN", "0") == "1"
 
-    # Files under data/ in the HF repo. Val + labels by default; train optional.
     targets = ["WIDER_val.zip", "wider_face_split.zip"]
     if want_train:
         targets.append("WIDER_train.zip")
 
-    # Skip if the parts we need are already extracted.
     needed = {"WIDER_val", "wider_face_split"} | ({"WIDER_train"} if want_train else set())
     if all((dest_dir / n).exists() for n in needed):
         print("  [SKIP] WiderFace already downloaded and extracted")
         return
 
     HF_REPO = "CUHK-CSE/wider_face"
-    GDRIVE_IDS = {  # fallback only
+    GDRIVE_IDS = {
         "WIDER_train.zip": "15hGDLhsx8bLgLcIRD5DhYt5iBxnjNF1M",
         "WIDER_val.zip": "1GUCogbp16PMGa39thoMMeWxp7Rp5oM8Q",
         "wider_face_split.zip": "1H68E4FCjjLdIny4Gp-6BFYNNSO9eClJq",
@@ -171,7 +154,6 @@ def download_widerface():
 
         src_zip = None
 
-        # ── Method 1: Hugging Face hub (primary; resumable, cached, no auth) ──
         try:
             from huggingface_hub import hf_hub_download
             print(f"  Downloading {filename} from Hugging Face ({HF_REPO})...")
@@ -181,7 +163,6 @@ def download_widerface():
         except Exception as e:
             print(f"    Hugging Face failed: {e}")
 
-        # ── Method 2: gdown fallback (Google Drive, may be rate-limited) ──
         if src_zip is None or not src_zip.exists():
             try:
                 import gdown
@@ -197,7 +178,6 @@ def download_widerface():
             print(f"  [WARNING] {filename} not downloaded - skipping extraction")
             continue
 
-        # ── Validate (catch HTML-as-zip) then extract ──
         try:
             with zipfile.ZipFile(src_zip) as z:
                 z.namelist()
@@ -205,15 +185,13 @@ def download_widerface():
             print(f"  [ERROR] {filename} is not a valid zip archive - skipping")
             continue
         extract_zip(src_zip, dest_dir)
-        # Free disk: drop the zip only if we wrote it into dest_dir (gdown path).
-        # The HF cache copy is left in place for resume/reuse.
+
         if src_zip.parent == dest_dir:
             try:
                 src_zip.unlink()
             except OSError:
                 pass
 
-    # ── Verify ──
     val_dir = dest_dir / "WIDER_val"
     val_imgs = sum(1 for _ in val_dir.rglob("*.jpg")) if val_dir.exists() else 0
     print(f"\n  WiderFace ready: WIDER_val images = {val_imgs}")
@@ -222,9 +200,6 @@ def download_widerface():
         print("  [WARNING] No WIDER_val images found. Manual fallback:")
         print("    huggingface-cli download CUHK-CSE/wider_face data/WIDER_val.zip \\")
         print("      --repo-type dataset --local-dir datasets/widerface")
-
-
-# ── 3. RTTS (Real-world Task-driven Testing Set) ────────────────────────────
 
 def download_rtts():
     """Download RTTS dataset for hazy/foggy images."""
@@ -241,7 +216,6 @@ def download_rtts():
 
     archive_path = dest_dir / "RTTS.zip"
 
-    # Method 1: Kaggle (if authenticated)
     if not archive_path.exists():
         try:
             print("  Trying Kaggle API (tuncnguyn/rtts-dataset)...")
@@ -255,20 +229,18 @@ def download_rtts():
         except (Exception, SystemExit) as e:
             print(f"  Kaggle method failed: {e}")
 
-    # Method 2: UT Austin Box mirror (official RESIDE-beta link)
     if not archive_path.exists():
         try:
             print("  Trying UT Austin Box mirror (official RESIDE-beta)...")
             box_url = "https://utexas.app.box.com/index.php?rm=box_download_shared_file&shared_name=2yekra41udg9rgyzi3ysi513cps621qz&file_id=f_766454923366"
             download_file(box_url, archive_path, desc="RTTS")
-            # Verify it's actually a zip, not an HTML error page
+
             if archive_path.exists() and archive_path.stat().st_size < 10000:
                 archive_path.unlink()
                 print("  Box download returned an error page, removing...")
         except Exception as e:
             print(f"  Box method failed: {e}")
 
-    # Method 3: gdown from Google Drive (original, may be rate-limited)
     if not archive_path.exists():
         try:
             import gdown
@@ -278,13 +250,12 @@ def download_rtts():
         except Exception as e:
             print(f"  Google Drive method failed: {e}")
 
-    # Extract if we got the archive
     if archive_path.exists() and archive_path.stat().st_size > 1000:
         extract_zip(archive_path, dest_dir)
         print("  RTTS download complete!")
         print(f"  Location: {dest_dir}")
     else:
-        # Clean up partial/empty file
+
         if archive_path.exists():
             archive_path.unlink()
         print("  [ERROR] All download methods failed for RTTS.")
@@ -292,9 +263,6 @@ def download_rtts():
         print("    1. Kaggle: https://www.kaggle.com/datasets/tuncnguyn/rtts-dataset")
         print("    2. Dropbox: https://bit.ly/3c4gl3z")
         print(f"    3. Extract to: {dest_dir}")
-
-
-# ── 4. BDD100K ──────────────────────────────────────────────────────────────
 
 def download_bdd100k():
     """Download BDD100K with multi-source fallback and integrity validation.
@@ -328,7 +296,6 @@ def download_bdd100k():
         print(f"  [SKIP] BDD100K already present ({img_count} images, {json_count} JSONs)")
         return
 
-    # ── Method 1: Kaggle (preferred — single archive, both images and labels) ──
     try:
         print("  Trying Kaggle (solesensei/solesensei_bdd100k)...")
         import kaggle
@@ -348,23 +315,20 @@ def download_bdd100k():
     except (Exception, SystemExit) as e:
         print(f"  Kaggle method failed: {e}")
 
-    # ── Method 2: archive.org (validate size + zip header before extract) ──
     files = {
         "bdd100k_images.zip": {
             "url": "https://archive.org/download/bdd100k/bdd100k_images.zip",
-            "min_bytes": 5 * 1024**3,   # 5 GB floor (actual ~6.5 GB)
+            "min_bytes": 5 * 1024**3,
         },
         "bdd100k_labels.zip": {
             "url": "https://archive.org/download/bdd100k/bdd100k_labels.zip",
-            "min_bytes": 50 * 1024**2,  # 50 MB floor (actual ~147 MB)
+            "min_bytes": 50 * 1024**2,
         },
     }
 
     for filename, info in files.items():
         archive_path = dest_dir / filename
 
-        # Drop partial/corrupt downloads — the prior 10 KB gate let HTML
-        # error pages pass as valid archives.
         if archive_path.exists() and archive_path.stat().st_size < info["min_bytes"]:
             print(f"  Removing undersized {filename} ({archive_path.stat().st_size} bytes)")
             archive_path.unlink()
@@ -384,7 +348,6 @@ def download_bdd100k():
                 archive_path.unlink()
             continue
 
-        # Header validation catches HTML-wrapped-as-zip without the cost of testzip()
         try:
             with zipfile.ZipFile(archive_path) as z:
                 z.namelist()
@@ -398,7 +361,6 @@ def download_bdd100k():
         except Exception as e:
             print(f"  [ERROR] {filename} extraction failed: {e}")
 
-    # ── Final verification — hard fail if dataset isn't usable ──
     img_count, json_count = _state()
     if img_count > 10000 and json_count > 0:
         print(f"  BDD100K ready: {img_count} images, {json_count} JSON files")
@@ -415,9 +377,6 @@ def download_bdd100k():
         f"  3. Official (registration): https://bdd-data.berkeley.edu/"
     )
 
-
-# ── 5. LOL Dataset (Low-Light Object) ────────────────────────────────────────
-
 def download_exdark():
     """Download LOL (Low-light) dataset for Phase 2 low-light enhancement evaluation.
 
@@ -432,7 +391,7 @@ def download_exdark():
     print("DOWNLOADING: LOL Dataset (Low-light, paired for PSNR/SSIM)")
     print("="*60)
 
-    dest_dir = DATASETS_DIR / "exdark"   # keep key name 'exdark' for compatibility
+    dest_dir = DATASETS_DIR / "exdark"
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     existing = (
@@ -445,7 +404,6 @@ def download_exdark():
 
     downloaded = False
 
-    # ── Method 1: HuggingFace (no auth needed) ──
     try:
         print("  Trying HuggingFace (geekyrakshit/LoL-Dataset)...")
         from huggingface_hub import snapshot_download
@@ -455,9 +413,7 @@ def download_exdark():
             local_dir=str(dest_dir / "lol_hf"),
             ignore_patterns=["*.csv", "*.json", "*.md"],
         )
-        # LoL on HuggingFace ships as lol_dataset.zip — snapshot_download
-        # only fetches files, it doesn't unpack archives. Without this step
-        # the *.png count below stays 0 and the function falsely falls back.
+
         for zp in (dest_dir / "lol_hf").rglob("*.zip"):
             try:
                 extract_zip(zp, dest_dir)
@@ -470,7 +426,6 @@ def download_exdark():
     except Exception as e:
         print(f"  HuggingFace method failed: {e}")
 
-    # ── Method 2: Kaggle fallback ──
     if not downloaded:
         try:
             print("  Trying Kaggle (aryan022/low-light-image-enhancement-dataset)...")
@@ -501,9 +456,6 @@ def download_exdark():
         print("    2. Kaggle: https://www.kaggle.com/datasets/aryan022/low-light-image-enhancement-dataset")
         print(f"    3. Extract to: {dest_dir}")
 
-
-# ── 6. FoggyCityscapes ─────────────────────────────────────────────────────
-
 def download_foggy_cityscapes():
     """Download FoggyCityscapes dataset for foggy scene detection.
 
@@ -528,7 +480,6 @@ def download_foggy_cityscapes():
 
     downloaded = False
 
-    # Method 1: Kaggle dataset (subset, no registration needed)
     try:
         print("  Trying Kaggle (yessicatuteja/foggy-cityscapes-image-dataset)...")
         import kaggle
@@ -546,7 +497,6 @@ def download_foggy_cityscapes():
     except (Exception, SystemExit) as e:
         print(f"  Kaggle method failed: {e}")
 
-    # Method 2: Direct synthesis from Cityscapes (if available)
     if not downloaded:
         cityscapes_dir = DATASETS_DIR / "cityscapes"
         if cityscapes_dir.exists():
@@ -568,9 +518,6 @@ def download_foggy_cityscapes():
         print("    3. Kaggle subset: https://www.kaggle.com/datasets/yessicatuteja/foggy-cityscapes-image-dataset")
         print(f"    4. Extract to: {dest_dir}")
 
-
-# ── Main ─────────────────────────────────────────────────────────────────────
-
 def main():
     print("Phase 1: Dataset Download")
     print(f"Base directory: {BASE_DIR}")
@@ -587,7 +534,6 @@ def main():
         "foggy_cityscapes": download_foggy_cityscapes,
     }
 
-    # Allow downloading specific datasets via CLI args
     targets = sys.argv[1:] if len(sys.argv) > 1 else list(datasets.keys())
 
     for name in targets:
@@ -613,7 +559,6 @@ def main():
             print(f"  {name:12s} -> NOT DOWNLOADED")
 
     print("\nDone! Next: run preprocess_data.py")
-
 
 if __name__ == "__main__":
     main()

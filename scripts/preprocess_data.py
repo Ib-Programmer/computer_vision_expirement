@@ -24,13 +24,11 @@ from tqdm import tqdm
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATASETS_DIR = BASE_DIR / "datasets"
 
-# Configuration
 TARGET_SIZE = (640, 640)
 SPLIT_RATIO = {"train": 0.70, "val": 0.15, "test": 0.15}
 RANDOM_SEED = 42
-CHUNK_SIZE = 200        # images per chunk before gc
-JPEG_QUALITY = 90       # save disk space on HDD (100=lossless, 90=good balance)
-
+CHUNK_SIZE = 200
+JPEG_QUALITY = 90
 
 def collect_images(dataset_path):
     """Collect all image file paths from a dataset directory recursively."""
@@ -40,7 +38,6 @@ def collect_images(dataset_path):
         images.extend(dataset_path.rglob(f"*{ext}"))
         images.extend(dataset_path.rglob(f"*{ext.upper()}"))
     return sorted(set(images))
-
 
 def resize_image(img, target_size=TARGET_SIZE):
     """Resize image while maintaining aspect ratio with letterbox padding."""
@@ -52,14 +49,12 @@ def resize_image(img, target_size=TARGET_SIZE):
 
     resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
-    # Pad to target size (black letterbox)
     canvas = np.zeros((target_h, target_w, 3), dtype=np.uint8)
     pad_top = (target_h - new_h) // 2
     pad_left = (target_w - new_w) // 2
     canvas[pad_top:pad_top + new_h, pad_left:pad_left + new_w] = resized
 
     return canvas
-
 
 def split_dataset(images, split_ratio=SPLIT_RATIO, seed=RANDOM_SEED):
     """Split image paths into train/val/test sets."""
@@ -77,7 +72,6 @@ def split_dataset(images, split_ratio=SPLIT_RATIO, seed=RANDOM_SEED):
         "test": shuffled[n_train + n_val:],
     }
 
-
 def get_output_path(img_path, split_dir):
     """Generate output path, handling duplicate filenames."""
     out_path = split_dir / img_path.name
@@ -86,7 +80,6 @@ def get_output_path(img_path, split_dir):
         suffix = img_path.suffix
         out_path = split_dir / f"{stem}_{hash(str(img_path)) % 10000}{suffix}"
     return out_path
-
 
 def process_chunk(chunk, split_dir, jpeg_quality=JPEG_QUALITY):
     """Process a chunk of images: read, resize, save. Returns (processed, skipped, failed)."""
@@ -97,7 +90,6 @@ def process_chunk(chunk, split_dir, jpeg_quality=JPEG_QUALITY):
     for img_path in chunk:
         out_path = get_output_path(img_path, split_dir)
 
-        # Skip if already processed (resume support)
         if out_path.exists():
             skipped += 1
             continue
@@ -110,7 +102,6 @@ def process_chunk(chunk, split_dir, jpeg_quality=JPEG_QUALITY):
 
             img_resized = resize_image(img, TARGET_SIZE)
 
-            # Save with controlled quality
             ext = out_path.suffix.lower()
             if ext in (".jpg", ".jpeg"):
                 cv2.imwrite(str(out_path), img_resized,
@@ -123,14 +114,12 @@ def process_chunk(chunk, split_dir, jpeg_quality=JPEG_QUALITY):
 
             processed += 1
 
-            # Release image memory immediately
             del img, img_resized
 
         except Exception as e:
             failed += 1
 
     return processed, skipped, failed
-
 
 def preprocess_dataset(dataset_name, chunk_size=CHUNK_SIZE):
     """Preprocess a single dataset in memory-safe chunks."""
@@ -145,7 +134,6 @@ def preprocess_dataset(dataset_name, chunk_size=CHUNK_SIZE):
     print(f"PREPROCESSING: {dataset_name}")
     print(f"{'='*60}")
 
-    # Collect paths only (no image data in memory)
     images = collect_images(src_dir)
     if not images:
         print(f"  [SKIP] No images found in {src_dir}")
@@ -154,7 +142,6 @@ def preprocess_dataset(dataset_name, chunk_size=CHUNK_SIZE):
     print(f"  Found {len(images)} images")
     print(f"  Chunk size: {chunk_size} images | JPEG quality: {JPEG_QUALITY}")
 
-    # Split into train/val/test
     splits = split_dataset(images)
 
     total_processed = 0
@@ -174,7 +161,6 @@ def preprocess_dataset(dataset_name, chunk_size=CHUNK_SIZE):
         split_skipped = 0
         split_failed = 0
 
-        # Process in chunks with progress bar
         pbar = tqdm(total=n_images, desc=f"    {split_name}", ncols=80, unit="img")
 
         for i in range(0, n_images, chunk_size):
@@ -187,7 +173,6 @@ def preprocess_dataset(dataset_name, chunk_size=CHUNK_SIZE):
 
             pbar.update(len(chunk))
 
-            # Free memory after each chunk
             gc.collect()
 
         pbar.close()
@@ -198,7 +183,6 @@ def preprocess_dataset(dataset_name, chunk_size=CHUNK_SIZE):
         total_skipped += split_skipped
         total_failed += split_failed
 
-    # Summary
     print(f"\n  {'─'*40}")
     print(f"  {dataset_name} DONE")
     print(f"    Total processed: {total_processed}")
@@ -212,7 +196,6 @@ def preprocess_dataset(dataset_name, chunk_size=CHUNK_SIZE):
             print(f"    {split_name}: {count} images")
 
     print(f"  Output: {out_dir}")
-
 
 def preprocess_bdd100k():
     """Convert BDD100K dataset to YOLO format with proper detection labels.
@@ -241,18 +224,12 @@ def preprocess_bdd100k():
     print("PREPROCESSING: BDD100K → YOLO format")
     print(f"{'='*60}")
 
-    # Check if already converted
     train_labels = out_dir / "train" / "labels"
     if train_labels.exists() and len(list(train_labels.glob("*.txt"))) > 1000:
         count = len(list(train_labels.glob("*.txt")))
         print(f"  [SKIP] Already converted ({count} train labels exist)")
         return
 
-    # ── Find label JSON files ──
-    # BDD100K ships in two layouts:
-    #   (a) consolidated:   det_{split}.json or bdd100k_labels_images_{split}.json
-    #   (b) per-image:      labels/100k/{split}/<image_id>.json   (archive.org mirror)
-    # The archive.org bdd100k_labels.zip uses layout (b), so we check both.
     label_files = {}
     per_image_dirs = {}
     for split in ['train', 'val']:
@@ -265,9 +242,6 @@ def preprocess_bdd100k():
             print(f"  Found {split} labels (consolidated): {consolidated[0]}")
             continue
 
-        # Per-image fallback: any directory named `<split>` under labels/ that
-        # contains *.json files. Pick the one with the most JSONs (avoids
-        # picking up empty/test directories with the same name).
         candidates = []
         for d in src_dir.rglob(split):
             if not d.is_dir():
@@ -290,13 +264,12 @@ def preprocess_bdd100k():
         print("  Make sure bdd100k_labels.zip was downloaded and extracted.")
         return
 
-    # ── Find image directories ──
     img_dirs = {}
     for split in ['train', 'val']:
-        # BDD100K images are usually in: bdd100k/images/100k/{train,val}/
+
         candidates = list(src_dir.rglob(f'100k/{split}'))
         if not candidates:
-            # Also try: bdd100k/{train,val}/
+
             for d in src_dir.rglob(split):
                 if d.is_dir() and any(d.glob('*.jpg')):
                     candidates.append(d)
@@ -311,14 +284,12 @@ def preprocess_bdd100k():
         print("  Expected: bdd100k/images/100k/train/ or similar")
         return
 
-    # ── BDD100K class mapping (10 detection classes) ──
     BDD_CLASSES = [
         'pedestrian', 'rider', 'car', 'truck', 'bus',
         'train', 'motorcycle', 'bicycle', 'traffic light', 'traffic sign'
     ]
     class_to_id = {c: i for i, c in enumerate(BDD_CLASSES)}
 
-    # BDD100K standard image size
     IMG_W, IMG_H = 1280, 720
 
     total_images = 0
@@ -331,14 +302,11 @@ def preprocess_bdd100k():
             print(f"  [SKIP] {split}: missing labels or images")
             continue
 
-        # Create output directories
         img_out = out_dir / split / "images"
         lbl_out = out_dir / split / "labels"
         img_out.mkdir(parents=True, exist_ok=True)
         lbl_out.mkdir(parents=True, exist_ok=True)
 
-        # Load annotations: yield {'name': str, 'labels': list} dicts in a
-        # uniform shape regardless of source format.
         print(f"\n  Loading {split} labels...")
         if has_consolidated:
             with open(label_files[split], 'r') as f:
@@ -354,7 +322,7 @@ def preprocess_bdd100k():
                             data = json.load(f)
                     except (json.JSONDecodeError, OSError):
                         continue
-                    # Per-image schema: {'name': '<id>', 'frames': [{'objects': [...]}]}
+
                     name = data.get('name', jp.stem)
                     if not name.endswith('.jpg'):
                         name = name + '.jpg'
@@ -379,9 +347,6 @@ def preprocess_bdd100k():
                 skipped += 1
                 continue
 
-            # Convert labels to YOLO format. Per-image schema uses 'category'
-            # at the top level (same as consolidated), so the loop body is
-            # unchanged for both formats.
             labels = ann.get('labels', [])
             yolo_lines = []
 
@@ -399,13 +364,11 @@ def preprocess_bdd100k():
                 x2 = float(box.get('x2', 0))
                 y2 = float(box.get('y2', 0))
 
-                # Convert to YOLO format: class x_center y_center width height (normalized 0-1)
                 x_center = ((x1 + x2) / 2) / IMG_W
                 y_center = ((y1 + y2) / 2) / IMG_H
                 w = (x2 - x1) / IMG_W
                 h = (y2 - y1) / IMG_H
 
-                # Clamp to valid range
                 x_center = max(0.0, min(1.0, x_center))
                 y_center = max(0.0, min(1.0, y_center))
                 w = max(0.001, min(1.0, w))
@@ -414,7 +377,6 @@ def preprocess_bdd100k():
                 class_id = class_to_id[cat]
                 yolo_lines.append(f"{class_id} {x_center:.6f} {y_center:.6f} {w:.6f} {h:.6f}")
 
-            # Link/copy image to output directory
             img_dest = img_out / img_name
             if not img_dest.exists():
                 try:
@@ -422,7 +384,6 @@ def preprocess_bdd100k():
                 except (OSError, NotImplementedError):
                     shutil.copy2(str(img_path), str(img_dest))
 
-            # Write YOLO label file (even if empty - marks image as "background")
             lbl_name = Path(img_name).stem + '.txt'
             lbl_dest = lbl_out / lbl_name
             with open(lbl_dest, 'w') as f:
@@ -438,7 +399,6 @@ def preprocess_bdd100k():
         total_images += converted
         print(f"    {split}: {converted} images converted, {skipped} skipped, {no_labels} backgrounds")
 
-    # Summary
     print(f"\n  {'─'*40}")
     print(f"  BDD100K → YOLO conversion DONE")
     print(f"    Total images: {total_images}")
@@ -454,7 +414,6 @@ def preprocess_bdd100k():
             non_empty = sum(1 for f in lbl_dir.glob("*.txt") if f.stat().st_size > 0)
             print(f"    {split}: {img_count} images, {lbl_count} labels ({non_empty} with objects)")
 
-
 def main():
     print("Phase 1: Data Preprocessing")
     print(f"Target size: {TARGET_SIZE}")
@@ -462,7 +421,6 @@ def main():
     print(f"Chunk size: {CHUNK_SIZE} images")
     print(f"JPEG quality: {JPEG_QUALITY}")
 
-    # Allow processing specific datasets via CLI args
     all_datasets = ["lfw", "widerface", "rtts", "bdd100k", "exdark"]
     targets = sys.argv[1:] if len(sys.argv) > 1 else all_datasets
 
@@ -471,7 +429,7 @@ def main():
             print(f"  [WARNING] Unknown dataset: {name}")
             continue
         try:
-            # BDD100K needs special handling (JSON labels → YOLO format)
+
             if name == "bdd100k":
                 preprocess_bdd100k()
             else:
@@ -485,7 +443,6 @@ def main():
     print("\n" + "="*60)
     print("PREPROCESSING COMPLETE")
     print("="*60)
-
 
 if __name__ == "__main__":
     main()

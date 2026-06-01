@@ -22,18 +22,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATASETS_DIR = BASE_DIR / "datasets"
 OUTPUT_DIR = BASE_DIR / "outputs" / "augmented"
 
-CHUNK_SIZE = 150        # images per chunk before gc
-JPEG_QUALITY = 90       # save disk space on HDD
-
-
-# ── Augmentation Transforms ─────────────────────────────────────────────────
-# Albumentations migrated to the 2.x API in 2024:
-#   RandomFog: fog_coef_lower/upper -> fog_coef_range=(lo, hi)
-#   RandomRain: slant_lower/upper   -> slant_range=(lo, hi)
-#   GaussNoise: var_limit           -> std_range=(lo, hi) (sigma, NOT variance — convert)
-# We use *_range with try/except so this script keeps working if albumentations
-# is downgraded to 1.x (kwargs are accepted but ignored ⇒ would silently use
-# defaults, hence the assertion check at the bottom of this file).
+CHUNK_SIZE = 150
+JPEG_QUALITY = 90
 
 def _make_fog(coef_range=(0.3, 0.7), alpha=0.08, p=1.0):
     try:
@@ -41,7 +31,6 @@ def _make_fog(coef_range=(0.3, 0.7), alpha=0.08, p=1.0):
     except TypeError:
         return A.RandomFog(fog_coef_lower=coef_range[0], fog_coef_upper=coef_range[1],
                            alpha_coef=alpha, p=p)
-
 
 def _make_rain(slant_range=(-10, 10), p=1.0):
     common = dict(drop_length=20, drop_width=1, drop_color=(200, 200, 200),
@@ -51,12 +40,8 @@ def _make_rain(slant_range=(-10, 10), p=1.0):
     except TypeError:
         return A.RandomRain(slant_lower=slant_range[0], slant_upper=slant_range[1], **common)
 
-
 def _make_gauss_noise(std_range=(0.012, 0.025), p=0.3):
-    # 2.x: std_range = sigma normalized to [0, 1] (fraction of 255).
-    # 1.x: var_limit = variance in pixel-space [0, 255**2].
-    # Original 1.x spec was var_limit=(10.0, 40.0) ⇒ std ≈ (3.16, 6.32) px
-    # ⇒ normalized ≈ (0.012, 0.025). Keep both APIs working via fallback.
+
     try:
         return A.GaussNoise(std_range=std_range, p=p)
     except TypeError:
@@ -64,10 +49,8 @@ def _make_gauss_noise(std_range=(0.012, 0.025), p=0.3):
         var_hi = (std_range[1] * 255) ** 2
         return A.GaussNoise(var_limit=(var_lo, var_hi), p=p)
 
-
 def get_fog_transform():
     return A.Compose([_make_fog((0.3, 0.7), 0.08, 1.0)])
-
 
 def get_low_light_transform():
     return A.Compose([
@@ -79,14 +62,11 @@ def get_low_light_transform():
         A.RandomGamma(gamma_limit=(150, 300), p=0.7),
     ])
 
-
 def get_motion_blur_transform():
     return A.Compose([A.MotionBlur(blur_limit=(7, 15), p=1.0)])
 
-
 def get_rain_transform():
     return A.Compose([_make_rain((-10, 10), 1.0)])
-
 
 def get_combined_transform():
     return A.Compose([
@@ -100,11 +80,10 @@ def get_combined_transform():
                 contrast_limit=(-0.2, 0.0),
                 p=1.0,
             ),
-            A.MotionBlur(blur_limit=(7, 13), p=1.0),  # odd kernel sizes only in 2.x
+            A.MotionBlur(blur_limit=(7, 13), p=1.0),
         ], p=0.5),
         _make_gauss_noise((0.012, 0.025), 0.3),
     ])
-
 
 AUGMENTATIONS = {
     "fog": get_fog_transform(),
@@ -113,9 +92,6 @@ AUGMENTATIONS = {
     "rain": get_rain_transform(),
     "combined": get_combined_transform(),
 }
-
-
-# ── Chunk-based Augmentation ────────────────────────────────────────────────
 
 def augment_chunk(chunk, transform, aug_name, out_dir, jpeg_quality=JPEG_QUALITY):
     """Augment a chunk of images. Returns (processed, skipped, failed)."""
@@ -126,7 +102,6 @@ def augment_chunk(chunk, transform, aug_name, out_dir, jpeg_quality=JPEG_QUALITY
     for img_path in chunk:
         out_path = out_dir / f"{img_path.stem}_{aug_name}{img_path.suffix}"
 
-        # Skip if already augmented (resume support)
         if out_path.exists():
             skipped += 1
             continue
@@ -157,7 +132,6 @@ def augment_chunk(chunk, transform, aug_name, out_dir, jpeg_quality=JPEG_QUALITY
 
     return processed, skipped, failed
 
-
 def augment_dataset(dataset_name, aug_types=None, chunk_size=CHUNK_SIZE):
     """Apply augmentations to a preprocessed dataset in chunks."""
     src_dir = DATASETS_DIR / f"{dataset_name}_processed"
@@ -174,7 +148,7 @@ def augment_dataset(dataset_name, aug_types=None, chunk_size=CHUNK_SIZE):
     print(f"AUGMENTING: {dataset_name}")
     print(f"{'='*60}")
 
-    for split in ["train"]:  # Only augment training set
+    for split in ["train"]:
         split_dir = src_dir / split
         if not split_dir.exists():
             continue
@@ -214,7 +188,6 @@ def augment_dataset(dataset_name, aug_types=None, chunk_size=CHUNK_SIZE):
             print(f"      -> new: {total_p} | skipped: {total_s} | failed: {total_f}")
 
     print(f"  Augmentation complete for {dataset_name}")
-
 
 def create_comparison_grid(dataset_name, num_samples=4):
     """Create a visual comparison grid: original vs each augmentation."""
@@ -259,7 +232,6 @@ def create_comparison_grid(dataset_name, num_samples=4):
 
     print(f"  Comparison grids saved to {grid_dir}")
 
-
 def main():
     print("Phase 1: Data Augmentation")
     print(f"Output directory: {OUTPUT_DIR}")
@@ -284,7 +256,6 @@ def main():
     print("AUGMENTATION COMPLETE")
     print("="*60)
     print("Next: run dataset_stats.py to verify everything")
-
 
 if __name__ == "__main__":
     main()

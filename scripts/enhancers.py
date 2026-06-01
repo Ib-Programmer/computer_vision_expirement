@@ -1,23 +1,7 @@
-"""
-Shared image-enhancement models for cross-notebook reuse.
+"""Shared image-enhancement models: Zero-DCE++, FFA-Net, Restormer.
 
-Phase 2 defines Zero-DCE++, FFA-Net and Restormer inside its own kernel, so
-Phase 3 (§3.3) and Phase 4 (§4.5) — which run in *separate* kernels — had no
-way to apply the same enhancers to their degraded images. Phase 4 §4.5 already
-looks for this module:
-
-    from scripts import enhancers as _enh
-    enhance_ffanet   = getattr(_enh, 'enhance_ffanet', None)
-    enhance_zero_dce = getattr(_enh, 'enhance_zero_dce', None)
-    enhance_restormer = getattr(_enh, 'enhance_restormer', None)
-
-This file provides exactly those three callables. Each model is built lazily on
-first use (so `import enhancers` stays cheap) and loads the SAME pretrained
-weights Phase 2 uses, with the same download fallbacks. If pretrained weights
-cannot be fetched the function still runs (random init) and prints a clear
-[WARN] — matching Phase 2's own behaviour — so callers never crash.
-
-All three functions take and return a BGR uint8 image (OpenCV convention).
+Reused by Phase 3 (3.3) and Phase 4 (4.5). Each model lazy-loads its
+pretrained weights on first use. Functions take and return BGR uint8.
 """
 
 import os
@@ -32,22 +16,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Anchor everything to the repo root so behaviour is independent of cwd.
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEIGHTS_DIR = BASE_DIR / "weights"
 WEIGHTS_DIR.mkdir(parents=True, exist_ok=True)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Lazy singletons (populated on first enhance_* call)
 _zero_dce = None
 _ffa_net = None
 _restormer = None
 
-
-# ────────────────────────────────────────────────────────────────────────────
-# Zero-DCE++  (Li et al., TPAMI 2021) — low-light
-# ────────────────────────────────────────────────────────────────────────────
 class _CSDN(nn.Module):
     """Depthwise-separable conv block (CSDN_Tem in official Zero-DCE++)."""
 
@@ -58,7 +36,6 @@ class _CSDN(nn.Module):
 
     def forward(self, x):
         return self.point_conv(self.depth_conv(x))
-
 
 class _ZeroDCEpp(nn.Module):
     """Official Zero-DCE++ architecture (matches the published Epoch99.pth)."""
@@ -90,7 +67,6 @@ class _ZeroDCEpp(nn.Module):
         for _ in range(8):
             enhanced = enhanced + x_r * (torch.pow(enhanced, 2) - enhanced)
         return enhanced, x_r
-
 
 def _load_zero_dce():
     model = _ZeroDCEpp(scale_factor=1).to(DEVICE)
@@ -127,7 +103,6 @@ def _load_zero_dce():
     model.eval()
     return model
 
-
 def enhance_zero_dce(img_bgr):
     """Low-light enhancement with Zero-DCE++. BGR uint8 in/out."""
     global _zero_dce
@@ -140,10 +115,6 @@ def enhance_zero_dce(img_bgr):
     out = enhanced.squeeze(0).cpu().clamp(0, 1).permute(1, 2, 0).numpy()
     return cv2.cvtColor((out * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
 
-
-# ────────────────────────────────────────────────────────────────────────────
-# FFA-Net  (Qin et al., AAAI 2020) — dehazing
-# ────────────────────────────────────────────────────────────────────────────
 class _PALayer(nn.Module):
     def __init__(self, channel):
         super().__init__()
@@ -153,7 +124,6 @@ class _PALayer(nn.Module):
 
     def forward(self, x):
         return x * self.pa(x)
-
 
 class _CALayer(nn.Module):
     def __init__(self, channel):
@@ -166,10 +136,8 @@ class _CALayer(nn.Module):
     def forward(self, x):
         return x * self.ca(self.avg_pool(x))
 
-
 def _default_conv(in_c, out_c, k, bias=True):
     return nn.Conv2d(in_c, out_c, k, padding=k // 2, bias=bias)
-
 
 class _FFABlock(nn.Module):
     def __init__(self, conv, dim, k):
@@ -186,7 +154,6 @@ class _FFABlock(nn.Module):
         res = self.palayer(self.calayer(res)) + x
         return res
 
-
 class _FFAGroup(nn.Module):
     def __init__(self, conv, dim, k, blocks):
         super().__init__()
@@ -196,7 +163,6 @@ class _FFAGroup(nn.Module):
 
     def forward(self, x):
         return self.gp(x) + x
-
 
 class _FFANet(nn.Module):
     def __init__(self, gps=3, blocks=19):
@@ -226,13 +192,12 @@ class _FFANet(nn.Module):
         out = self.palayer(out)
         return self.post(out) + x1
 
-
 def _load_ffanet():
     model = _FFANet(gps=3, blocks=19).to(DEVICE)
     wt = WEIGHTS_DIR / "ffa_net_outdoor.pk"
 
     if not wt.exists():
-        # Method 1: Kaggle dataset (outdoor / OTS model)
+
         try:
             subprocess.run(
                 ["kaggle", "datasets", "download", "-d", "balraj98/ffanet-pretrained-weights",
@@ -248,7 +213,7 @@ def _load_ffanet():
             print(f"[enhancers] FFA-Net Kaggle download failed: {e}")
 
     if not wt.exists():
-        # Method 2: official Google Drive folder
+
         try:
             import gdown
             gdown.download_folder(
@@ -279,7 +244,6 @@ def _load_ffanet():
     model.eval()
     return model
 
-
 def enhance_ffanet(img_bgr):
     """Dehazing with FFA-Net. BGR uint8 in/out."""
     global _ffa_net
@@ -296,10 +260,6 @@ def enhance_ffanet(img_bgr):
     out = out[:, :, :h, :w].squeeze(0).cpu().clamp(0, 1).permute(1, 2, 0).numpy()
     return cv2.cvtColor((out * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
 
-
-# ────────────────────────────────────────────────────────────────────────────
-# Restormer  (Zamir et al., CVPR 2022) — deraining / general restoration
-# ────────────────────────────────────────────────────────────────────────────
 def _load_restormer():
     repo = BASE_DIR / "Restormer"
     if not repo.exists():
@@ -362,7 +322,6 @@ def _load_restormer():
         print("[enhancers] [WARN] Restormer using RANDOM weights (pretrained unavailable).")
     model.eval()
     return model
-
 
 def enhance_restormer(img_bgr, tile_size=512, tile_overlap=32):
     """Deraining with Restormer (tiled inference to bound memory). BGR uint8 in/out."""

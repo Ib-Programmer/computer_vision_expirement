@@ -13,7 +13,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATASETS_DIR = BASE_DIR / "datasets"
 OUTPUT_DIR = BASE_DIR / "outputs" / "augmented"
 
-
 def count_images(directory):
     """Count image files in a directory."""
     if not directory.exists():
@@ -24,7 +23,6 @@ def count_images(directory):
         count += len(list(directory.rglob(f"*{ext}")))
         count += len(list(directory.rglob(f"*{ext.upper()}")))
     return count
-
 
 def get_image_stats(directory, sample_size=100):
     """Get image dimension statistics from a sample."""
@@ -54,7 +52,6 @@ def get_image_stats(directory, sample_size=100):
         "avg_size": f"{int(np.mean(widths))}x{int(np.mean(heights))}",
     }
 
-
 def report_raw_datasets():
     """Report statistics for raw downloaded datasets."""
     print("\n" + "="*60)
@@ -77,7 +74,6 @@ def report_raw_datasets():
             print(f"    Max size: {stats['max_size']}")
             print(f"    Avg size: {stats['avg_size']}")
 
-        # Count subdirectories
         if d.exists():
             subdirs = [x for x in d.iterdir() if x.is_dir()]
             if subdirs:
@@ -87,7 +83,6 @@ def report_raw_datasets():
                     print(f"      - {sd.name}: {sd_count} images")
                 if len(subdirs) > 5:
                     print(f"      ... and {len(subdirs) - 5} more")
-
 
 def report_processed_datasets():
     """Report statistics for preprocessed datasets."""
@@ -114,7 +109,6 @@ def report_processed_datasets():
             print(f"    {split:5s}: {count:>6d} images")
 
         print(f"    {'total':5s}: {total:>6d} images")
-
 
 def report_augmented_datasets():
     """Report statistics for augmented datasets."""
@@ -147,7 +141,6 @@ def report_augmented_datasets():
                 if count > 0:
                     print(f"    {split}/{aug:12s}: {count:>6d} images")
 
-
 def report_summary():
     """Print overall summary."""
     print("\n" + "="*60)
@@ -168,7 +161,6 @@ def report_summary():
     print(f"  Augmented images:   {total_augmented:>8d}")
     print(f"  Total images:       {total_raw + total_processed + total_augmented:>8d}")
 
-    # Check readiness for Phase 2
     print("\n  Phase 1 Readiness Check:")
     checks = {
         "Raw datasets downloaded": total_raw > 0,
@@ -179,7 +171,6 @@ def report_summary():
         status = "PASS" if passed else "PENDING"
         print(f"    [{status:7s}] {check}")
 
-
 def main():
     print("Phase 1: Dataset Statistics & Verification")
     print(f"Datasets directory: {DATASETS_DIR}")
@@ -188,7 +179,6 @@ def main():
     report_processed_datasets()
     report_augmented_datasets()
     report_summary()
-
 
 if __name__ == "__main__":
     main()
