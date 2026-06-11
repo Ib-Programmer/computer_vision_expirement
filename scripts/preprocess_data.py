@@ -256,6 +256,26 @@ def preprocess_bdd100k():
             print(f"  Found {split} labels (per-image): {best} ({n} JSON files)")
 
     if not label_files and not per_image_dirs:
+        # Aggressive fallback: find any JSON file whose name or ancestor path
+        # contains 'train' or 'val' – handles non-standard Kaggle dataset layouts.
+        all_jsons = sorted(src_dir.rglob('*.json'),
+                           key=lambda p: p.stat().st_size, reverse=True)
+        for j in all_jsons:
+            name_lower = j.name.lower()
+            path_lower = str(j).lower()
+            for split in ['train', 'val']:
+                if split not in label_files:
+                    if split in name_lower or split in path_lower:
+                        label_files[split] = j
+                        print(f"  Found {split} labels (fallback scan): {j.relative_to(src_dir)} ({j.stat().st_size/1e6:.0f} MB)")
+        # last resort: assign by file size (largest = train)
+        if not label_files and len(all_jsons) >= 2:
+            label_files['train'] = all_jsons[0]
+            label_files['val'] = all_jsons[1]
+            print(f"  Found train labels (size-rank): {all_jsons[0].name} ({all_jsons[0].stat().st_size/1e6:.0f} MB)")
+            print(f"  Found val   labels (size-rank): {all_jsons[1].name} ({all_jsons[1].stat().st_size/1e6:.0f} MB)")
+
+    if not label_files and not per_image_dirs:
         print("  [ERROR] No BDD100K label JSON files found!")
         print("  Searched for:")
         print("    - det_{train,val}.json")

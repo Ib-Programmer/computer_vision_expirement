@@ -1,0 +1,135 @@
+# ─────────────────────────────────────────────────────────────
+#  REPLACEMENT FOR PHASE 3  Cell 4
+#  Robust BDD100K → YOLO conversion
+#  Handles any layout: finds JSON label files via rglob,
+#  image dirs by walking (any directory named train/val with jpgs).
+# ─────────────────────────────────────────────────────────────
+
+import os, json, shutil
+from pathlib import Path
+from tqdm import tqdm
+
+DATASETS_DIR = globals().get('DATASETS_DIR', '/content/computer_vision_expirement/datasets')
+BDD_ROOT  = f'{DATASETS_DIR}/bdd100k'
+YOLO_DIR  = f'{DATASETS_DIR}/bdd100k_yolo'
+W, H = 1280, 720
+
+CLASSES = [
+    'pedestrian','rider','car','truck','bus',
+    'train','motorcycle','bicycle','traffic light','traffic sign'
+]
+CLASS_ID = {c: i for i, c in enumerate(CLASSES)}
+
+# ── 1. inventory ─────────────────────────────────────────────
+if not os.path.isdir(BDD_ROOT):
+    print(f'[ERROR] {BDD_ROOT} not found. Run Cell 2 (setup) first.')
+    raise SystemExit
+
+all_jsons = sorted(Path(BDD_ROOT).rglob('*.json'),
+                   key=lambda p: p.stat().st_size, reverse=True)
+n_jpgs = sum(1 for _ in Path(BDD_ROOT).rglob('*.jpg'))
+print(f'BDD_ROOT : {BDD_ROOT}')
+print(f'inventory: {n_jpgs} jpg files, {len(all_jsons)} json files')
+for j in all_jsons[:6]:
+    print(f'  {j.relative_to(BDD_ROOT)}  ({j.stat().st_size/1e6:.1f} MB)')
+
+# ── 2. pick label JSON for each split ────────────────────────
+def pick_json(split):
+    # pass 1: filename contains split keyword
+    for j in all_jsons:
+        if split in j.name.lower():
+            return j
+    # pass 2: any ancestor directory name contains split keyword
+    for j in all_jsons:
+        if any(split in part.lower() for part in j.parts):
+            return j
+    # pass 3: if only 2 jsons exist, assign by rank (train=largest, val=second)
+    if len(all_jsons) >= 2:
+        return all_jsons[0] if split == 'train' else all_jsons[1]
+    if len(all_jsons) == 1:
+        return all_jsons[0]
+    return None
+
+# ── 3. find image directory for each split ───────────────────
+def pick_img_dir(split):
+    # fast walk – stop at first directory named exactly `split` with jpg files
+    for dirpath, dirnames, filenames in os.walk(BDD_ROOT):
+        if os.path.basename(dirpath) == split:
+            if any(f.endswith('.jpg') for f in filenames):
+                return Path(dirpath)
+    # fallback: directory with most jpgs whose path contains split
+    best_n, best_d = 0, None
+    for dirpath, _, filenames in os.walk(BDD_ROOT):
+        if split not in dirpath.lower():
+            continue
+        n = sum(1 for f in filenames if f.endswith('.jpg'))
+        if n > best_n:
+            best_n, best_d = n, Path(dirpath)
+    return best_d
+
+# ── 4. convert one split ─────────────────────────────────────
+def convert_split(split):
+    json_p  = pick_json(split)
+    img_dir = pick_img_dir(split)
+
+    print(f'\n── {split} ──')
+    if json_p is None:
+        print(f'  [ERROR] no label JSON found for {split}'); return
+    if img_dir is None:
+        print(f'  [ERROR] no image dir found for {split}'); return
+
+    print(f'  labels : .../{json_p.relative_to(BDD_ROOT)}  ({json_p.stat().st_size/1e6:.0f} MB)')
+    print(f'  images : .../{img_dir.relative_to(BDD_ROOT)}  ({sum(1 for _ in img_dir.glob("*.jpg"))} files)')
+
+    img_out = Path(YOLO_DIR) / split / 'images'
+    lbl_out = Path(YOLO_DIR) / split / 'labels'
+    img_out.mkdir(parents=True, exist_ok=True)
+    lbl_out.mkdir(parents=True, exist_ok=True)
+
+    with open(json_p, 'r') as f:
+        anns = json.load(f)
+    print(f'  annotation entries: {len(anns)}')
+
+    ok = skip = no_img = 0
+    for ann in tqdm(anns, desc=f'  {split}', ncols=80):
+        name = ann.get('name', '')
+        if not name:
+            skip += 1; continue
+        src = img_dir / name
+        if not src.exists():
+            no_img += 1; continue
+
+        lines = []
+        for lbl in (ann.get('labels') or []):
+            cat = lbl.get('category', '')
+            if cat not in CLASS_ID:
+                continue
+            b = lbl.get('box2d')
+            if not b:
+                continue
+            x1, y1, x2, y2 = float(b['x1']), float(b['y1']), float(b['x2']), float(b['y2'])
+            xc = max(0., min(1., ((x1+x2)/2) / W))
+            yc = max(0., min(1., ((y1+y2)/2) / H))
+            bw = max(.001, min(1., (x2-x1) / W))
+            bh = max(.001, min(1., (y2-y1) / H))
+            lines.append(f'{CLASS_ID[cat]} {xc:.6f} {yc:.6f} {bw:.6f} {bh:.6f}')
+
+        dest = img_out / name
+        if not dest.exists():
+            try:
+                os.symlink(src.resolve(), dest)
+            except (OSError, NotImplementedError):
+                shutil.copy2(str(src), str(dest))
+
+        (lbl_out / (Path(name).stem + '.txt')).write_text('\n'.join(lines))
+        ok += 1
+
+    non_empty = sum(1 for f in lbl_out.glob('*.txt') if f.stat().st_size > 0)
+    print(f'  done: {ok} converted  |  {skip} bad entries  |  {no_img} missing images')
+    print(f'  labels written: {ok} total  ({non_empty} with detections)')
+
+# ── run ──────────────────────────────────────────────────────
+for sp in ['train', 'val']:
+    convert_split(sp)
+
+print(f'\nDone. YOLO output: {YOLO_DIR}')
