@@ -218,16 +218,20 @@ def download_rtts():
 
     if not archive_path.exists():
         try:
-            print("  Trying Kaggle API (tuncnguyn/rtts-dataset)...")
-            import kaggle
-            kaggle.api.dataset_download_files(
-                "tuncnguyn/rtts-dataset", path=str(dest_dir), unzip=True
+            print("  Trying Kaggle CLI (tuncnguyn/rtts-dataset)...")
+            import subprocess
+            r = subprocess.run(
+                ["kaggle", "datasets", "download", "-d", "tuncnguyn/rtts-dataset",
+                 "-p", str(dest_dir), "--unzip"],
+                capture_output=True, text=True, timeout=600,
             )
-            print("  Downloaded via Kaggle!")
-            print(f"  Location: {dest_dir}")
-            return
-        except (Exception, SystemExit) as e:
-            print(f"  Kaggle method failed: {e}")
+            if r.returncode == 0:
+                print("  Downloaded via Kaggle CLI!")
+                print(f"  Location: {dest_dir}")
+                return
+            print(f"  Kaggle CLI failed (exit {r.returncode}): {r.stderr[-300:]}")
+        except Exception as e:
+            print(f"  Kaggle CLI failed: {e}")
 
     if not archive_path.exists():
         try:
@@ -296,24 +300,29 @@ def download_bdd100k():
         print(f"  [SKIP] BDD100K already present ({img_count} images, {json_count} JSONs)")
         return
 
+    # Use the Kaggle CLI subprocess — the CLI authenticates via KAGGLE_API_TOKEN
+    # (KGAT_... format) which the Python kaggle.api library does not support reliably.
     try:
-        print("  Trying Kaggle (solesensei/solesensei_bdd100k)...")
-        import kaggle
-        kaggle.api.dataset_download_files(
-            "solesensei/solesensei_bdd100k",
-            path=str(dest_dir),
-            unzip=True,
+        print("  Trying Kaggle CLI (solesensei/solesensei_bdd100k)...")
+        import subprocess
+        r = subprocess.run(
+            ["kaggle", "datasets", "download", "-d", "solesensei/solesensei_bdd100k",
+             "-p", str(dest_dir), "--unzip"],
+            capture_output=True, text=True, timeout=3600,
         )
-        img_count, json_count = _state()
-        if img_count > 10000 and json_count > 0:
-            print(f"  Kaggle download successful ({img_count} images, {json_count} JSONs)")
-            print(f"  Location: {dest_dir}")
-            return
-        print(f"  Kaggle returned {img_count} images, {json_count} JSONs — falling back to archive.org")
-    except ImportError:
-        print("  [WARNING] kaggle package not installed. Run: pip install kaggle")
-    except (Exception, SystemExit) as e:
-        print(f"  Kaggle method failed: {e}")
+        if r.returncode == 0:
+            img_count, json_count = _state()
+            if img_count > 10000 and json_count > 0:
+                print(f"  Kaggle CLI download successful ({img_count} images, {json_count} JSONs)")
+                print(f"  Location: {dest_dir}")
+                return
+            print(f"  Kaggle CLI finished but found only {img_count} images, {json_count} JSONs")
+        else:
+            print(f"  Kaggle CLI failed (exit {r.returncode}): {r.stderr[-400:]}")
+    except FileNotFoundError:
+        print("  [WARNING] kaggle CLI not found. Run: pip install kaggle")
+    except Exception as e:
+        print(f"  Kaggle CLI failed: {e}")
 
     files = {
         "bdd100k_images.zip": {
@@ -428,21 +437,23 @@ def download_exdark():
 
     if not downloaded:
         try:
-            print("  Trying Kaggle (aryan022/low-light-image-enhancement-dataset)...")
-            import kaggle
-            kaggle.api.dataset_download_files(
-                "aryan022/low-light-image-enhancement-dataset",
-                path=str(dest_dir),
-                unzip=True,
+            print("  Trying Kaggle CLI (aryan022/low-light-image-enhancement-dataset)...")
+            import subprocess
+            r = subprocess.run(
+                ["kaggle", "datasets", "download", "-d",
+                 "aryan022/low-light-image-enhancement-dataset",
+                 "-p", str(dest_dir), "--unzip"],
+                capture_output=True, text=True, timeout=600,
             )
-            img_count = sum(1 for _ in dest_dir.rglob("*.png")) + sum(1 for _ in dest_dir.rglob("*.jpg"))
-            if img_count > 100:
-                downloaded = True
-                print(f"  Kaggle download successful ({img_count} images)")
-        except ImportError:
-            print("  [WARNING] kaggle package not installed. Run: pip install kaggle")
-        except (Exception, SystemExit) as e:
-            print(f"  Kaggle method failed: {e}")
+            if r.returncode == 0:
+                img_count = sum(1 for _ in dest_dir.rglob("*.png")) + sum(1 for _ in dest_dir.rglob("*.jpg"))
+                if img_count > 100:
+                    downloaded = True
+                    print(f"  Kaggle CLI download successful ({img_count} images)")
+            else:
+                print(f"  Kaggle CLI failed (exit {r.returncode}): {r.stderr[-300:]}")
+        except Exception as e:
+            print(f"  Kaggle CLI failed: {e}")
 
     if downloaded:
         final_count = sum(1 for _ in dest_dir.rglob("*.png")) + sum(1 for _ in dest_dir.rglob("*.jpg"))
@@ -481,21 +492,23 @@ def download_foggy_cityscapes():
     downloaded = False
 
     try:
-        print("  Trying Kaggle (yessicatuteja/foggy-cityscapes-image-dataset)...")
-        import kaggle
-        kaggle.api.dataset_download_files(
-            "yessicatuteja/foggy-cityscapes-image-dataset",
-            path=str(dest_dir),
-            unzip=True,
+        print("  Trying Kaggle CLI (yessicatuteja/foggy-cityscapes-image-dataset)...")
+        import subprocess
+        r = subprocess.run(
+            ["kaggle", "datasets", "download", "-d",
+             "yessicatuteja/foggy-cityscapes-image-dataset",
+             "-p", str(dest_dir), "--unzip"],
+            capture_output=True, text=True, timeout=600,
         )
-        img_count = sum(1 for _ in dest_dir.rglob("*.png")) + sum(1 for _ in dest_dir.rglob("*.jpg"))
-        if img_count > 100:
-            downloaded = True
-            print(f"  Kaggle download successful ({img_count} images)")
-    except ImportError:
-        print("  [WARNING] kaggle package not installed. Run: pip install kaggle")
-    except (Exception, SystemExit) as e:
-        print(f"  Kaggle method failed: {e}")
+        if r.returncode == 0:
+            img_count = sum(1 for _ in dest_dir.rglob("*.png")) + sum(1 for _ in dest_dir.rglob("*.jpg"))
+            if img_count > 100:
+                downloaded = True
+                print(f"  Kaggle CLI download successful ({img_count} images)")
+        else:
+            print(f"  Kaggle CLI failed (exit {r.returncode}): {r.stderr[-300:]}")
+    except Exception as e:
+        print(f"  Kaggle CLI failed: {e}")
 
     if not downloaded:
         cityscapes_dir = DATASETS_DIR / "cityscapes"
