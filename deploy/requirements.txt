@@ -1,0 +1,14 @@
+# HuggingFace Spaces inference API — CPU-only, no Colab/GPU deps
+# torch is excluded: ZeroDCE++ enhancement falls back to CLAHE automatically.
+# InsightFace and ONNX YOLO both run on onnxruntime (CPU).
+
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+opencv-python-headless>=4.10.0
+numpy>=1.26.0
+requests>=2.31.0
+python-multipart>=0.0.9
+ultralytics>=8.4.0
+insightface>=0.7.3
+onnxruntime>=1.18.0
+faiss-cpu>=1.8.0
