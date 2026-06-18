@@ -1,6 +1,5 @@
 """
 Outdoor Detection & Face Recognition REST API — HuggingFace Spaces Edition
-Matches the Spring Boot InferenceClient contract exactly.
 
 Endpoints:
   POST /pipeline              download → enhance → detect → recognize
