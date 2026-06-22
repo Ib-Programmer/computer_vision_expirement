@@ -85,18 +85,48 @@ def _match(embedding: np.ndarray, threshold: float = 0.4):
 
 # ── startup ──────────────────────────────────────────────────────────────────
 
+HF_REPO   = os.environ.get("HF_MODEL_REPO", "")   # e.g. "ibmuhd557/cv-thesis-models"
+HF_TOKEN  = os.environ.get("HF_TOKEN", "")        # read from HF Space secrets
+
+def _download_models(models_dir: str):
+    """Pull model weights from HF Hub into /app/models on first startup."""
+    if not HF_REPO:
+        print("[startup] HF_MODEL_REPO not set — skipping Hub download")
+        return
+    try:
+        from huggingface_hub import hf_hub_download
+        os.makedirs(models_dir, exist_ok=True)
+        for filename in ["yolov8n_best.onnx", "yolov8n_best.pt"]:
+            dest = os.path.join(models_dir, filename)
+            if os.path.exists(dest):
+                print(f"[startup] {filename} already cached")
+                continue
+            try:
+                path = hf_hub_download(
+                    repo_id=HF_REPO, filename=filename,
+                    token=HF_TOKEN or None,
+                    local_dir=models_dir,
+                )
+                print(f"[startup] Downloaded {filename} → {path}")
+            except Exception as e:
+                print(f"[startup] Could not download {filename}: {e}")
+    except ImportError:
+        print("[startup] huggingface_hub not installed — skipping Hub download")
+
+
 @app.on_event("startup")
 async def startup():
     global detector, detector_fmt, face_app
     MODELS = os.environ.get("PROJECT_DIR", "/app/models")
 
+    _download_models(MODELS)
+
     try:
         from ultralytics import YOLO
         for path, fmt in [
-            (f"{MODELS}/phase5/yolov8n_best.onnx",                   "onnx"),
-            (f"{MODELS}/phase3/yolov8n_outdoor_aug/weights/best.pt", "pytorch_fp32"),
-            (f"{MODELS}/phase3/yolov8n_baseline/weights/best.pt",    "pytorch_fp32"),
-            ("yolov8n.pt",                                             "pytorch_pretrained"),
+            (f"{MODELS}/yolov8n_best.onnx",                          "onnx"),
+            (f"{MODELS}/yolov8n_best.pt",                            "pytorch_fp32"),
+            ("yolov8n.pt",                                            "pytorch_pretrained"),
         ]:
             if os.path.exists(path):
                 detector = YOLO(path); detector_fmt = fmt
@@ -106,7 +136,7 @@ async def startup():
 
     try:
         from insightface.app import FaceAnalysis
-        # buffalo_l is auto-downloaded from insightface CDN on first run
+        # buffalo_l auto-downloads from insightface CDN on first run
         face_app = FaceAnalysis(name="buffalo_l",
                                 providers=["CPUExecutionProvider"])
         face_app.prepare(ctx_id=-1, det_size=(640, 640))
