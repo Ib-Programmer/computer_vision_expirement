@@ -39,9 +39,11 @@ enhance_ffa   = None   # FFA-Net     (fog)
 
 _gallery: dict[str, dict] = {}   # embedding_id → {name, embedding}
 
-INTERNAL_TOKEN = os.environ.get("INTERNAL_TOKEN", "dev-only-internal-token")
-HF_REPO        = os.environ.get("HF_MODEL_REPO", "")
-HF_TOKEN       = os.environ.get("HF_TOKEN", "")
+# Secret names in HF Spaces must be alphanumeric only (no underscores).
+# Non-sensitive defaults are hardcoded so no secret is needed for them.
+INTERNAL_TOKEN = os.environ.get("INTERNALTOKEN", "dev-only-internal-token")
+HF_REPO        = os.environ.get("HFMODELREPO", "IbProgrammmer/cv-thesis-models")
+HF_TOKEN       = os.environ.get("HFTOKEN", "")
 MODELS         = os.environ.get("PROJECT_DIR", "/app/models")
 
 # ── HF Hub model manifest ─────────────────────────────────────────────────────
