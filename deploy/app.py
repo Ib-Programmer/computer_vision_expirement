@@ -255,19 +255,24 @@ async def startup():
     # ── detector (prefer ONNX, fallback to .pt, fallback to pretrained) ──────
     try:
         from ultralytics import YOLO
-        for path, fmt in [
+        candidates = [
             (f"{MODELS}/yolov8n_best.onnx",           "onnx"),
             (f"{MODELS}/yolov8n_int8.onnx",            "onnx_int8"),
             (f"{MODELS}/yolov8n_outdoor_aug_best.pt",  "pytorch_aug"),
             (f"{MODELS}/yolov8n_baseline_best.pt",     "pytorch_baseline"),
             (f"{MODELS}/rtdetr_outdoor_aug_best.pt",   "rtdetr"),
-            ("yolov8n.pt",                              "pytorch_pretrained"),
-        ]:
+        ]
+        for path, fmt in candidates:
             if os.path.exists(path):
                 detector = YOLO(path)
                 detector_fmt = fmt
                 print(f"[startup] Detector: {os.path.basename(path)} [{fmt}]")
                 break
+        if detector is None:
+            # pretrained fallback — YOLO auto-downloads yolov8n.pt on first call
+            detector = YOLO("yolov8n.pt")
+            detector_fmt = "pytorch_pretrained"
+            print("[startup] Detector: yolov8n.pt [pytorch_pretrained] (auto-downloaded)")
     except Exception as e:
         print(f"[startup] Detector load failed: {e}")
 
