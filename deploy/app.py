@@ -63,9 +63,14 @@ HF_MODELS = {
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _download(url: str) -> np.ndarray:
-    resp = _requests.get(url, timeout=20)
-    resp.raise_for_status()
-    arr = np.frombuffer(resp.content, np.uint8)
+    if url.startswith("data:"):
+        encoded = url.split(",", 1)[1]
+        data = base64.b64decode(encoded)
+        arr = np.frombuffer(data, np.uint8)
+    else:
+        resp = _requests.get(url, timeout=20)
+        resp.raise_for_status()
+        arr = np.frombuffer(resp.content, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
         raise ValueError("imdecode returned None")
@@ -323,7 +328,7 @@ async def pipeline(body: dict,
     t0 = time.time()
     detections = []
     if detector:
-        for r in detector(enhanced, verbose=False):
+        for r in detector(enhanced, verbose=False, conf=0.45, iou=0.45):
             for box in r.boxes:
                 detections.append({
                     "class":      r.names[int(box.cls)],
