@@ -17,7 +17,7 @@ HuggingFace Space env vars (Settings → Variables and secrets):
   INTERNAL_TOKEN   must match Spring Boot INFERENCE_TOKEN
   PROJECT_DIR      override model cache path (default /app/models)
 """
-import base64, os, time, uuid
+import base64, os, shutil, subprocess, tempfile, time, uuid
 from typing import Optional
 
 import cv2
@@ -81,6 +81,25 @@ def _xyxy_to_xywh(coords) -> dict:
     x1, y1, x2, y2 = [float(v) for v in coords]
     return {"x": round(x1, 1), "y": round(y1, 1),
             "w": round(x2 - x1, 1), "h": round(y2 - y1, 1)}
+
+
+def _draw_boxes(frame: np.ndarray, detections: list, recognitions: list) -> np.ndarray:
+    out = frame.copy()
+    for d in detections:
+        b = d["bbox"]
+        x, y, w, h = int(b["x"]), int(b["y"]), int(b["w"]), int(b["h"])
+        cv2.rectangle(out, (x, y), (x + w, y + h), (0, 200, 0), 2)
+        label = f"{d['class']} {d['confidence']:.0%}"
+        cv2.putText(out, label, (x, max(y - 6, 12)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 200, 0), 1, cv2.LINE_AA)
+    for r in recognitions:
+        b = r["bbox"]
+        x, y, w, h = int(b["x"]), int(b["y"]), int(b["w"]), int(b["h"])
+        cv2.rectangle(out, (x, y), (x + w, y + h), (255, 80, 0), 2)
+        label = f"{r['identity']} {r['confidence']:.0%}"
+        cv2.putText(out, label, (x, max(y - 6, 12)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 80, 0), 1, cv2.LINE_AA)
+    return out
 
 
 def _to_data_uri(img_bgr: np.ndarray) -> str:
@@ -366,6 +385,146 @@ async def pipeline(body: dict,
         "image_width":  w,
         "image_height": h,
     }
+
+
+MAX_VIDEO_SECONDS = 60   # hard cap — stop reading frames beyond this
+SAMPLE_EVERY      = 4    # run inference on every Nth frame; apply boxes to all
+
+
+@app.post("/pipeline_video")
+async def pipeline_video(body: dict,
+                         x_internal_token: Optional[str] = Header(None)):
+    t_total = time.time()
+    video_b64 = body.get("video_b64")
+    condition = body.get("condition", "auto")
+    if not video_b64:
+        raise HTTPException(status_code=400, detail="video_b64 is required")
+
+    # ── decode and write to temp file ────────────────────────────────────────
+    tmp_dir = tempfile.mkdtemp(prefix="cv_vid_")
+    try:
+        raw = base64.b64decode(video_b64)
+        in_path  = os.path.join(tmp_dir, "input.mp4")
+        out_path = os.path.join(tmp_dir, "annotated.mp4")
+        frm_dir  = os.path.join(tmp_dir, "frames")
+        os.makedirs(frm_dir, exist_ok=True)
+
+        with open(in_path, "wb") as f:
+            f.write(raw)
+
+        cap = cv2.VideoCapture(in_path)
+        if not cap.isOpened():
+            raise HTTPException(status_code=400, detail="Cannot open video file")
+
+        fps    = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        max_frames = int(MAX_VIDEO_SECONDS * fps)
+
+        enh_ms_total = det_ms_total = rec_ms_total = 0.0
+        frame_idx = 0
+        written   = 0
+        last_dets = []
+        last_recs = []
+        all_dets  = []
+        all_recs  = []
+        enh_route = f"{condition}:clahe"
+
+        while frame_idx < max_frames:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            if frame_idx % SAMPLE_EVERY == 0:
+                t0 = time.time()
+                enhanced, enh_route = _enhance(frame, condition)
+                enh_ms_total += (time.time() - t0) * 1000
+
+                t0 = time.time()
+                last_dets = []
+                if detector:
+                    for r in detector(enhanced, verbose=False, conf=0.45, iou=0.45):
+                        for box in r.boxes:
+                            last_dets.append({
+                                "class":      r.names[int(box.cls)],
+                                "confidence": round(float(box.conf), 4),
+                                "bbox":       _xyxy_to_xywh(box.xyxy[0].tolist()),
+                            })
+                det_ms_total += (time.time() - t0) * 1000
+
+                t0 = time.time()
+                last_recs = []
+                if face_app:
+                    for face in face_app.get(enhanced):
+                        name, eid, conf = _match(face.embedding)
+                        last_recs.append({
+                            "identity":    name,
+                            "identity_id": eid,
+                            "confidence":  conf,
+                            "bbox":        _xyxy_to_xywh(face.bbox.tolist()),
+                        })
+                rec_ms_total += (time.time() - t0) * 1000
+
+                all_dets.extend(last_dets)
+                all_recs.extend(last_recs)
+
+            annotated = _draw_boxes(frame, last_dets, last_recs)
+            cv2.imwrite(os.path.join(frm_dir, f"{written:06d}.jpg"), annotated,
+                        [cv2.IMWRITE_JPEG_QUALITY, 88])
+            written   += 1
+            frame_idx += 1
+
+        cap.release()
+
+        if written == 0:
+            raise HTTPException(status_code=400, detail="Video contained no readable frames")
+
+        # ── assemble H264 MP4 with ffmpeg ────────────────────────────────────
+        subprocess.run([
+            "ffmpeg", "-y",
+            "-r", str(fps),
+            "-i", os.path.join(frm_dir, "%06d.jpg"),
+            "-vcodec", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-crf", "23",
+            "-preset", "fast",
+            out_path,
+        ], check=True, capture_output=True)
+
+        with open(out_path, "rb") as f:
+            annotated_b64 = base64.b64encode(f.read()).decode()
+
+        n_sampled = max(frame_idx // SAMPLE_EVERY, 1)
+        total_ms  = (time.time() - t_total) * 1000
+
+        # Deduplicate recognitions by identity for the summary list
+        seen_ids = set()
+        unique_recs = []
+        for rec in all_recs:
+            key = rec["identity"]
+            if key not in seen_ids:
+                seen_ids.add(key)
+                unique_recs.append(rec)
+
+        return {
+            "annotated_video_b64": annotated_b64,
+            "detections":          all_dets,
+            "recognitions":        unique_recs,
+            "enhancement_route":   enh_route,
+            "condition":           condition,
+            "latency_ms": {
+                "enhancement": round(enh_ms_total / n_sampled, 1),
+                "detection":   round(det_ms_total / n_sampled, 1),
+                "recognition": round(rec_ms_total / n_sampled, 1),
+                "total":       round(total_ms, 1),
+            },
+            "frame_count":  written,
+            "video_width":  width,
+            "video_height": height,
+            "media_type":   "video",
+        }
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 @app.post("/enrol")
