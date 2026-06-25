@@ -479,15 +479,20 @@ async def pipeline_video(body: dict,
         if written == 0:
             raise HTTPException(status_code=400, detail="Video contained no readable frames")
 
-        # ── assemble H264 MP4 with ffmpeg ────────────────────────────────────
+        # ── assemble H264 MP4 with ffmpeg (preserve original audio) ─────────
         subprocess.run([
             "ffmpeg", "-y",
             "-r", str(fps),
-            "-i", os.path.join(frm_dir, "%06d.jpg"),
+            "-i", os.path.join(frm_dir, "%06d.jpg"),  # annotated frames (video)
+            "-i", in_path,                              # original file (audio)
+            "-map", "0:v:0",
+            "-map", "1:a?",          # copy audio track if present; '?' = optional
             "-vcodec", "libx264",
             "-pix_fmt", "yuv420p",
             "-crf", "23",
             "-preset", "fast",
+            "-c:a", "aac",           # re-encode audio to AAC for max compatibility
+            "-shortest",             # stop when shorter stream ends
             out_path,
         ], check=True, capture_output=True)
 
