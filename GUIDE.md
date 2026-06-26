@@ -1075,7 +1075,3 @@ Used when no ground-truth clear image is available (blind quality assessment). M
 | **Token** | A piece of data (JWT token, Kaggle token, HuggingFace token) |
 | **Weight** | A learned number inside a neural network |
 
----
-
-*Document generated for the USTC Master's Thesis: "Outdoor Object Detection and Face Recognition Under Adverse Weather Conditions"*
-*Author: Muhammad Bashir Dantani — Defense: December 2026*
