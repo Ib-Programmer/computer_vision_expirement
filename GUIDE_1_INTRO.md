@@ -134,8 +134,3 @@ The pipeline does not just run in a research notebook. It is deployed as a live 
 | 5 — Optimization | Tested ONNX, INT8, pruning, TRT FP16 | Pruning gave 1.50× speedup; TRT FP16 environment failed |
 | 6 — Deployment | Integrated pipeline measured end-to-end | ~111 ms for clear/rainy, ~146 ms for low-light, ~4,333 ms for foggy |
 
----
-
-*Continue to GUIDE_2_INTERMEDIATE.md for the technical implementation details.*
-*Thesis: "Outdoor Object Detection and Face Recognition Under Adverse Weather Conditions"*
-*Author: Muhammad Bashir Dantani — USTC Master's Thesis — Defense: December 2026*
