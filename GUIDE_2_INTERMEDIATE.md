@@ -338,9 +338,3 @@ The inference API returns a JSON payload containing:
 - `recognitions`: list of `{identity, similarity, bbox}`
 - `enhanced_image_url`: base64-encoded JPEG of the enhanced frame
 - `latency_ms`: `{enhancement, detection, recognition, total}`
-
----
-
-*Continue to GUIDE_3_ADVANCED.md for research-level analysis of the results and architecture decisions.*
-*Thesis: "Outdoor Object Detection and Face Recognition Under Adverse Weather Conditions"*
-*Author: Muhammad Bashir Dantani — USTC Master's Thesis — Defense: December 2026*
