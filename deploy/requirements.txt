@@ -14,3 +14,13 @@ onnxruntime>=1.18.0
 faiss-cpu>=1.8.0
 huggingface_hub>=0.23.0
 torch>=2.1.0
+
+# Optional: MMDetection/MMYOLO detector backend (see scripts/setup_mmyolo.py).
+# Commented out by default — mmcv's compiled ops are a real install risk on
+# this CPU-only slim image and haven't been verified to build here. Enable
+# only after confirming the install + weight conversion works in Colab first.
+# openmim>=0.3.9
+# mmengine>=0.10.0
+# mmcv>=2.0.0
+# mmdet>=3.0.0
+# mmyolo @ git+https://github.com/open-mmlab/mmyolo.git

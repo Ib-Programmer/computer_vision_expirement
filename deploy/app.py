@@ -48,6 +48,7 @@ MODELS         = "/tmp/models"   # /tmp is always writable by any user
 # filename in HF repo → local path under MODELS/
 HF_MODELS = {
     # Detection (pick the best available at startup)
+    "yolov8n_outdoor_aug_mmyolo.pth": "yolov8n_outdoor_aug_mmyolo.pth",  # converted via scripts/setup_mmyolo.py
     "yolov8n_best.onnx":           "yolov8n_best.onnx",
     "yolov8n_outdoor_aug_best.pt": "yolov8n_outdoor_aug_best.pt",
     "yolov8n_baseline_best.pt":    "yolov8n_baseline_best.pt",
@@ -112,6 +113,45 @@ def _clahe(img_bgr: np.ndarray) -> np.ndarray:
     l, a, b = cv2.split(lab)
     l = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(l)
     return cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
+
+
+def _pick_device() -> str:
+    try:
+        import torch
+        return "cuda:0" if torch.cuda.is_available() else "cpu"
+    except ImportError:
+        return "cpu"
+
+
+def _run_detector(img: np.ndarray) -> list:
+    """Run the loaded detector (MMYOLO or Ultralytics) and return unified detection dicts."""
+    if detector is None:
+        return []
+    if detector_fmt == "mmyolo":
+        from mmdet.apis import inference_detector
+        result = inference_detector(detector, img)
+        inst = result.pred_instances
+        out = []
+        for bbox, score, label in zip(inst.bboxes.cpu().numpy(),
+                                      inst.scores.cpu().numpy(),
+                                      inst.labels.cpu().numpy()):
+            if score < 0.45:
+                continue
+            out.append({
+                "class":      detector.dataset_meta["classes"][int(label)],
+                "confidence": round(float(score), 4),
+                "bbox":       _xyxy_to_xywh(bbox.tolist()),
+            })
+        return out
+    out = []
+    for r in detector(img, verbose=False, conf=0.45, iou=0.45):
+        for box in r.boxes:
+            out.append({
+                "class":      r.names[int(box.cls)],
+                "confidence": round(float(box.conf), 4),
+                "bbox":       _xyxy_to_xywh(box.xyxy[0].tolist()),
+            })
+    return out
 
 
 def _match(embedding: np.ndarray, threshold: float = 0.4):
@@ -276,29 +316,45 @@ async def startup():
 
     _pull_from_hub()
 
+    # ── detector: MMYOLO backend if converted weights + config are present ───
+    mmyolo_weights = f"{MODELS}/yolov8n_outdoor_aug_mmyolo.pth"
+    mmyolo_config = os.path.join(os.path.dirname(__file__), "..", "configs",
+                                 "mmyolo_yolov8n_bdd100k.py")
+    if os.path.exists(mmyolo_weights) and os.path.exists(mmyolo_config):
+        try:
+            from mmdet.apis import init_detector
+            device = _pick_device()
+            detector = init_detector(mmyolo_config, mmyolo_weights, device=device)
+            detector_fmt = "mmyolo"
+            print(f"[startup] Detector: MMYOLO YOLOv8n (BDD100K) [{device}]")
+        except Exception as e:
+            print(f"[startup] MMYOLO detector load failed ({e}) — falling back to Ultralytics")
+            detector = None
+
     # ── detector (prefer ONNX, fallback to .pt, fallback to pretrained) ──────
-    try:
-        from ultralytics import YOLO
-        candidates = [
-            (f"{MODELS}/yolov8n_best.onnx",           "onnx"),
-            (f"{MODELS}/yolov8n_int8.onnx",            "onnx_int8"),
-            (f"{MODELS}/yolov8n_outdoor_aug_best.pt",  "pytorch_aug"),
-            (f"{MODELS}/yolov8n_baseline_best.pt",     "pytorch_baseline"),
-            (f"{MODELS}/rtdetr_outdoor_aug_best.pt",   "rtdetr"),
-        ]
-        for path, fmt in candidates:
-            if os.path.exists(path):
-                detector = YOLO(path)
-                detector_fmt = fmt
-                print(f"[startup] Detector: {os.path.basename(path)} [{fmt}]")
-                break
-        if detector is None:
-            # pretrained fallback — YOLO auto-downloads yolov8n.pt on first call
-            detector = YOLO("yolov8n.pt")
-            detector_fmt = "pytorch_pretrained"
-            print("[startup] Detector: yolov8n.pt [pytorch_pretrained] (auto-downloaded)")
-    except Exception as e:
-        print(f"[startup] Detector load failed: {e}")
+    if detector is None:
+        try:
+            from ultralytics import YOLO
+            candidates = [
+                (f"{MODELS}/yolov8n_best.onnx",           "onnx"),
+                (f"{MODELS}/yolov8n_int8.onnx",            "onnx_int8"),
+                (f"{MODELS}/yolov8n_outdoor_aug_best.pt",  "pytorch_aug"),
+                (f"{MODELS}/yolov8n_baseline_best.pt",     "pytorch_baseline"),
+                (f"{MODELS}/rtdetr_outdoor_aug_best.pt",   "rtdetr"),
+            ]
+            for path, fmt in candidates:
+                if os.path.exists(path):
+                    detector = YOLO(path)
+                    detector_fmt = fmt
+                    print(f"[startup] Detector: {os.path.basename(path)} [{fmt}]")
+                    break
+            if detector is None:
+                # pretrained fallback — YOLO auto-downloads yolov8n.pt on first call
+                detector = YOLO("yolov8n.pt")
+                detector_fmt = "pytorch_pretrained"
+                print("[startup] Detector: yolov8n.pt [pytorch_pretrained] (auto-downloaded)")
+        except Exception as e:
+            print(f"[startup] Detector load failed: {e}")
 
     # ── face analyzer (buffalo_l auto-downloads from InsightFace CDN) ─────────
     try:
@@ -345,15 +401,7 @@ async def pipeline(body: dict,
     enh_ms = (time.time() - t0) * 1000
 
     t0 = time.time()
-    detections = []
-    if detector:
-        for r in detector(enhanced, verbose=False, conf=0.45, iou=0.45):
-            for box in r.boxes:
-                detections.append({
-                    "class":      r.names[int(box.cls)],
-                    "confidence": round(float(box.conf), 4),
-                    "bbox":       _xyxy_to_xywh(box.xyxy[0].tolist()),
-                })
+    detections = _run_detector(enhanced)
     det_ms = (time.time() - t0) * 1000
 
     t0 = time.time()
@@ -441,15 +489,7 @@ async def pipeline_video(body: dict,
                 enh_ms_total += (time.time() - t0) * 1000
 
                 t0 = time.time()
-                last_dets = []
-                if detector:
-                    for r in detector(enhanced, verbose=False, conf=0.45, iou=0.45):
-                        for box in r.boxes:
-                            last_dets.append({
-                                "class":      r.names[int(box.cls)],
-                                "confidence": round(float(box.conf), 4),
-                                "bbox":       _xyxy_to_xywh(box.xyxy[0].tolist()),
-                            })
+                last_dets = _run_detector(enhanced)
                 det_ms_total += (time.time() - t0) * 1000
 
                 t0 = time.time()
