@@ -213,5 +213,3 @@ Spring Boot also talks to:
 - [ ] TensorRT FP16 benchmarks (Phase 5)
 - [ ] End-to-end latency benchmarks (Phase 6)
 - [ ] Write thesis Chapters 3 & 4
-- [ ] Revise and submit both paper drafts
-- [ ] Thesis defence (December 2026)

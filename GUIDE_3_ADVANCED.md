@@ -269,9 +269,3 @@ This is a contribution rather than a failure: it provides empirical evidence aga
 **Gallery scaling**: at N=100 gallery embeddings, FAISS IndexFlatIP takes < 1 ms. At N=10,000 (a realistic deployment), it takes ~1 ms — still negligible. At N=1,000,000 it would require an approximate index (FAISS IVF or HNSW) to stay under 10 ms. The current IndexFlatIP design is not scalable to large galleries, but the switch to IVF is a one-line FAISS change.
 
 **Covariate shift measurement**: the domain gap between BDD100K (North American driving) and Chinese urban outdoor surveillance has not been quantified. A calibration set of Chinese outdoor images with annotations would allow a domain adaptation study.
-
----
-
-*This document is a companion to GUIDE_1_INTRO.md and GUIDE_2_INTERMEDIATE.md.*
-*Thesis: "Outdoor Object Detection and Face Recognition Under Adverse Weather Conditions"*
-*Author: Muhammad Bashir Dantani — USTC Master's Thesis — Defense: December 2026*
