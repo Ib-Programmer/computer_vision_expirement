@@ -64,9 +64,12 @@ def verify_parity(src_weights: str, dst_weights: str, val_images: str, n_check: 
     from ultralytics import YOLO
     from mmdet.apis import init_detector, inference_detector
 
-    images = sorted(glob.glob(f"{val_images}/*.jpg"))[:n_check]
+    images = []
+    for ext in ("*.jpg", "*.jpeg", "*.png"):
+        images.extend(glob.glob(f"{val_images}/**/{ext}", recursive=True))
+    images = sorted(images)[:n_check]
     if not images:
-        print(f"[warn] no .jpg images found under {val_images} — skipping parity check")
+        print(f"[warn] no .jpg/.jpeg/.png images found under {val_images} — skipping parity check")
         return
 
     ul_model = YOLO(src_weights)
