@@ -1,6 +1,14 @@
 # Pinned for reproducibility — see run_pipeline.py
 # Versions chosen to match Colab runtime (Apr–May 2026, CUDA 12.1).
-# If Colab moves to CUDA 12.4+, bump onnxruntime-gpu to 1.20.x.
+#
+# onnxruntime-gpu is intentionally left UNPINNED (>=1.19.0) rather than
+# hard-pinned. 1.18.1 was pinned here previously and broke in Aug 2026 when
+# Colab's CUDA runtime moved past what that build's cuBLAS linkage supported
+# (symptom: "libcublasLt.so.11: cannot open shared object file" at startup).
+# Letting pip resolve the latest compatible build avoids re-hitting this
+# every time Colab's base image updates. If a specific version is needed
+# again for reproducibility, re-pin AND verify it against the Colab
+# session's actual CUDA version first (`!nvidia-smi` / `torch.version.cuda`).
 
 torch==2.4.1
 torchvision==0.19.1
@@ -32,7 +40,7 @@ onnx==1.16.2
 # onnxruntime-gpu also provides CPUExecutionProvider, so the CPU-only
 # `onnxruntime` package is redundant. Installing BOTH can clash and make
 # InsightFace silently fall back to CPU (missing the <100ms GPU target).
-onnxruntime-gpu==1.18.1
+onnxruntime-gpu>=1.19.0
 pyiqa==0.1.13
 basicsr==1.4.2
 einops==0.8.0
