@@ -20,8 +20,6 @@ import json
 import sys
 from pathlib import Path
 
-from PIL import Image
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATASETS_DIR = BASE_DIR / "datasets"
 SRC_DIR = DATASETS_DIR / "bdd100k_yolo"
@@ -32,6 +30,13 @@ CLASSES = (
     'pedestrian', 'rider', 'car', 'truck', 'bus',
     'train', 'motorcycle', 'bicycle', 'traffic light', 'traffic sign',
 )
+
+# BDD100K images are natively 1280x720 (scripts/preprocess_data.py hardcodes the same
+# constants when normalizing the YOLO labels in the first place). Reusing them here
+# instead of opening every image with PIL guarantees an exact round-trip and avoids a
+# per-image file open over Drive's FUSE mount, which is what made the original run look
+# hung and get Ctrl-C'd (tens of thousands of small Drive reads, no progress feedback).
+IMG_W, IMG_H = 1280, 720
 
 
 def convert_split(split):
@@ -45,10 +50,11 @@ def convert_split(split):
     img_id = 0
     ann_id = 0
     img_paths = sorted(img_dir.glob("*.jpg")) + sorted(img_dir.glob("*.jpeg")) + sorted(img_dir.glob("*.png"))
+    total = len(img_paths)
+    print(f"  {split}: converting {total} images...", flush=True)
 
-    for img_path in img_paths:
-        with Image.open(img_path) as im:
-            W, H = im.size
+    for i, img_path in enumerate(img_paths, 1):
+        W, H = IMG_W, IMG_H
 
         img_id += 1
         images.append({
@@ -57,6 +63,9 @@ def convert_split(split):
             "width": W,
             "height": H,
         })
+
+        if i % 500 == 0 or i == total:
+            print(f"    {split}: {i}/{total}", flush=True)
 
         lbl_path = lbl_dir / (img_path.stem + ".txt")
         if not lbl_path.exists():
