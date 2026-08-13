@@ -40,6 +40,9 @@ tmp_cell_*.txt
 *.doc
 *.docx
 
+# Local-only docs/notes (not pushed — only the top-level README.md is)
+docs/
+
 # Model weights (download in Colab)
 *.pt
 *.pth
