@@ -179,7 +179,8 @@ class _FFANet(nn.Module):
             nn.Conv2d(self.dim // 16, self.dim * self.gps, 1, bias=True), nn.Sigmoid())
         self.palayer = _PALayer(self.dim)
         self.pre = nn.Sequential(_default_conv(3, self.dim, k))
-        self.post = nn.Sequential(_default_conv(self.dim, 3, k))
+        self.post = nn.Sequential(_default_conv(self.dim, self.dim, k),
+                                  _default_conv(self.dim, 3, k))
 
     def forward(self, x1):
         x = self.pre(x1)
@@ -236,7 +237,7 @@ def _load_ffanet():
             else:
                 state = ckpt
             state = {k.replace('module.', '', 1): v for k, v in state.items()}
-            model.load_state_dict(state, strict=False)
+            model.load_state_dict(state, strict=True)
         except Exception as e:
             print(f"[enhancers] [WARN] FFA-Net load failed ({e}); using RANDOM weights.")
     else:
