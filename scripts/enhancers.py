@@ -252,6 +252,11 @@ def enhance_ffanet(img_bgr):
         _ffa_net = _load_ffanet()
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
     img_t = torch.from_numpy(img_rgb).permute(2, 0, 1).unsqueeze(0).to(DEVICE)
+    # Official FFA-Net test.py normalizes the input with these statistics;
+    # without it the outdoor weights wash the image out instead of dehazing.
+    mean = torch.tensor([0.64, 0.6, 0.58], device=DEVICE).view(1, 3, 1, 1)
+    std = torch.tensor([0.14, 0.15, 0.152], device=DEVICE).view(1, 3, 1, 1)
+    img_t = (img_t - mean) / std
     _, _, h, w = img_t.shape
     pad_h, pad_w = (4 - h % 4) % 4, (4 - w % 4) % 4
     if pad_h or pad_w:

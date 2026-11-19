@@ -370,7 +370,13 @@ def _load_ffa(weights_path: str):
                 self.post = nn.Sequential(conv(self.dim, self.dim, k),
                                           conv(self.dim, 3, k))
 
-            def forward(self, x1):
+            # Official FFA-Net test.py normalizes the RGB [0,1] input with these
+            # statistics; without it the outdoor weights wash the image out.
+            MEAN = torch.tensor([0.64, 0.6, 0.58]).view(1, 3, 1, 1)
+            STD = torch.tensor([0.14, 0.15, 0.152]).view(1, 3, 1, 1)
+
+            def forward(self, x):
+                x1 = (x - self.MEAN.to(x.device)) / self.STD.to(x.device)
                 x = self.pre(x1)
                 res1 = self.g1(x)
                 res2 = self.g2(res1)
