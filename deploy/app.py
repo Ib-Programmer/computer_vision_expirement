@@ -220,24 +220,55 @@ def _pull_from_hub():
 
 # ── enhancement loaders ───────────────────────────────────────────────────────
 
+def _load_state_dict(weights_path: str) -> dict:
+    """Read a checkpoint and return a clean state dict.
+
+    Handles raw state dicts and training checkpoints ({'model': ...}), and
+    strips the 'module.' prefix that nn.DataParallel adds.
+    """
+    import torch
+    ckpt = torch.load(weights_path, map_location="cpu", weights_only=False)
+    if isinstance(ckpt, dict):
+        for key in ("model", "state_dict"):
+            if key in ckpt and isinstance(ckpt[key], dict):
+                ckpt = ckpt[key]
+                break
+    return {k[len("module."):] if k.startswith("module.") else k: v
+            for k, v in ckpt.items()}
+
+
 def _load_zero_dce(weights_path: str):
-    """Load Zero-DCE++ for low-light enhancement. Requires torch."""
+    """Load Zero-DCE++ (official Zero-DCE_extension architecture) for low-light.
+
+    Returns a module that maps an RGB tensor in [0,1] to an enhanced tensor,
+    or None (CLAHE fallback) if the weights do not match the architecture.
+    """
     try:
         import torch
         import torch.nn as nn
 
-        class _DCENet(nn.Module):
+        class _CSDN(nn.Module):
+            """Depthwise-separable conv (CSDN_Tem in the official repo)."""
+            def __init__(self, in_ch, out_ch):
+                super().__init__()
+                self.depth_conv = nn.Conv2d(in_ch, in_ch, 3, 1, 1, groups=in_ch)
+                self.point_conv = nn.Conv2d(in_ch, out_ch, 1, 1, 0)
+
+            def forward(self, x):
+                return self.point_conv(self.depth_conv(x))
+
+        class _ZeroDCEpp(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.relu = nn.ReLU(inplace=True)
                 n = 32
-                self.e_conv1 = nn.Conv2d(3, n, 3, 1, 1, bias=True)
-                self.e_conv2 = nn.Conv2d(n, n, 3, 1, 1, bias=True)
-                self.e_conv3 = nn.Conv2d(n, n, 3, 1, 1, bias=True)
-                self.e_conv4 = nn.Conv2d(n, n, 3, 1, 1, bias=True)
-                self.e_conv5 = nn.Conv2d(n * 2, n, 3, 1, 1, bias=True)
-                self.e_conv6 = nn.Conv2d(n * 2, n, 3, 1, 1, bias=True)
-                self.e_conv7 = nn.Conv2d(n * 2, 24, 3, 1, 1, bias=True)
+                self.relu = nn.ReLU(inplace=True)
+                self.e_conv1 = _CSDN(3, n)
+                self.e_conv2 = _CSDN(n, n)
+                self.e_conv3 = _CSDN(n, n)
+                self.e_conv4 = _CSDN(n, n)
+                self.e_conv5 = _CSDN(n * 2, n)
+                self.e_conv6 = _CSDN(n * 2, n)
+                self.e_conv7 = _CSDN(n * 2, 3)
 
             def forward(self, x):
                 x1 = self.relu(self.e_conv1(x))
@@ -247,16 +278,14 @@ def _load_zero_dce(weights_path: str):
                 x5 = self.relu(self.e_conv5(torch.cat([x3, x4], 1)))
                 x6 = self.relu(self.e_conv6(torch.cat([x2, x5], 1)))
                 x_r = torch.tanh(self.e_conv7(torch.cat([x1, x6], 1)))
-                r = torch.split(x_r, 3, dim=1)
+                # Zero-DCE++ applies one shared curve map 8 times: LE(x) = x + a(x^2 - x)
                 out = x
-                for ri in r:
-                    out = out + ri * (1 - out)
-                return out
+                for _ in range(8):
+                    out = out + x_r * (torch.pow(out, 2) - out)
+                return out.clamp(0, 1)
 
-        net = _DCENet()
-        ckpt = torch.load(weights_path, map_location="cpu", weights_only=False)
-        state = ckpt.get("state_dict", ckpt)
-        net.load_state_dict(state, strict=False)
+        net = _ZeroDCEpp()
+        net.load_state_dict(_load_state_dict(weights_path), strict=True)
         net.eval()
         print(f"[startup] Zero-DCE++ loaded: {weights_path}")
         return net
@@ -266,12 +295,94 @@ def _load_zero_dce(weights_path: str):
 
 
 def _load_ffa(weights_path: str):
-    """Load FFA-Net for dehazing. Requires torch."""
+    """Load FFA-Net (gps=3, blocks=19, official architecture) for dehazing.
+
+    The .pk file is a torch.save() training checkpoint, not a pickled module,
+    so it must be read with torch.load and applied to a freshly built network.
+    """
     try:
         import torch
-        import pickle
-        with open(weights_path, "rb") as f:
-            net = pickle.load(f)
+        import torch.nn as nn
+
+        def conv(in_c, out_c, k, bias=True):
+            return nn.Conv2d(in_c, out_c, k, padding=k // 2, bias=bias)
+
+        class _PALayer(nn.Module):
+            def __init__(self, c):
+                super().__init__()
+                self.pa = nn.Sequential(
+                    nn.Conv2d(c, c // 8, 1, bias=True), nn.ReLU(inplace=True),
+                    nn.Conv2d(c // 8, 1, 1, bias=True), nn.Sigmoid())
+
+            def forward(self, x):
+                return x * self.pa(x)
+
+        class _CALayer(nn.Module):
+            def __init__(self, c):
+                super().__init__()
+                self.avg_pool = nn.AdaptiveAvgPool2d(1)
+                self.ca = nn.Sequential(
+                    nn.Conv2d(c, c // 8, 1, bias=True), nn.ReLU(inplace=True),
+                    nn.Conv2d(c // 8, c, 1, bias=True), nn.Sigmoid())
+
+            def forward(self, x):
+                return x * self.ca(self.avg_pool(x))
+
+        class _Block(nn.Module):
+            def __init__(self, dim, k):
+                super().__init__()
+                self.conv1 = conv(dim, dim, k)
+                self.act1 = nn.ReLU(inplace=True)
+                self.conv2 = conv(dim, dim, k)
+                self.calayer = _CALayer(dim)
+                self.palayer = _PALayer(dim)
+
+            def forward(self, x):
+                res = self.act1(self.conv1(x)) + x
+                res = self.palayer(self.calayer(self.conv2(res)))
+                return res + x
+
+        class _Group(nn.Module):
+            def __init__(self, dim, k, blocks):
+                super().__init__()
+                mods = [_Block(dim, k) for _ in range(blocks)]
+                mods.append(conv(dim, dim, k))
+                self.gp = nn.Sequential(*mods)
+
+            def forward(self, x):
+                return self.gp(x) + x
+
+        class _FFANet(nn.Module):
+            def __init__(self, gps=3, blocks=19):
+                super().__init__()
+                self.gps, self.dim, k = gps, 64, 3
+                self.g1 = _Group(self.dim, k, blocks)
+                self.g2 = _Group(self.dim, k, blocks)
+                self.g3 = _Group(self.dim, k, blocks)
+                self.ca = nn.Sequential(
+                    nn.AdaptiveAvgPool2d(1),
+                    nn.Conv2d(self.dim * gps, self.dim // 16, 1, bias=True),
+                    nn.ReLU(inplace=True),
+                    nn.Conv2d(self.dim // 16, self.dim * gps, 1, bias=True),
+                    nn.Sigmoid())
+                self.palayer = _PALayer(self.dim)
+                self.pre = nn.Sequential(conv(3, self.dim, k))
+                self.post = nn.Sequential(conv(self.dim, self.dim, k),
+                                          conv(self.dim, 3, k))
+
+            def forward(self, x1):
+                x = self.pre(x1)
+                res1 = self.g1(x)
+                res2 = self.g2(res1)
+                res3 = self.g3(res2)
+                w = self.ca(torch.cat([res1, res2, res3], dim=1))
+                w = w.view(-1, self.gps, self.dim)[:, :, :, None, None]
+                out = w[:, 0] * res1 + w[:, 1] * res2 + w[:, 2] * res3
+                out = self.palayer(out)
+                return (self.post(out) + x1).clamp(0, 1)
+
+        net = _FFANet()
+        net.load_state_dict(_load_state_dict(weights_path), strict=True)
         net.eval()
         print(f"[startup] FFA-Net loaded: {weights_path}")
         return net
