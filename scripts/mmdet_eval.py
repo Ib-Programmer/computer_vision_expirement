@@ -26,7 +26,12 @@ import sys
 import time
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+# Colab exports MPLBACKEND=module://matplotlib_inline.backend_inline, which does
+# not exist in the separate mmdet env; mmdet imports matplotlib on load, so force
+# a headless backend before anything pulls it in.
+os.environ['MPLBACKEND'] = 'Agg'
+
+REPO =Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 ENHANCERS = ('none', 'clahe', 'zero_dce', 'ffanet', 'restormer')
